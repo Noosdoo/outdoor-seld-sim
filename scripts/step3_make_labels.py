@@ -18,7 +18,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-OUT = ROOT / "out" / "clip"
+OUT = ROOT / "out" / ("clip_peepo" if "--peepo" in sys.argv else "clip")
 
 from outdoor_seld.geometry import sound_speed  # noqa: E402
 from outdoor_seld.labels import frame_label_rows, write_dcase_csv  # noqa: E402

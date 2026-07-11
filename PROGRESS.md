@@ -62,3 +62,26 @@
       図: out/figures/doa_labels_vs_iv.png, spectrogram_direct_vs_refl.png
 
 実行コマンドの正は README.md を参照。
+
+## バリアント: ピーポー型サイレン（2026-07-11 追加）
+- `make_peepo_siren`（960/770 Hz 交互・各0.65s・15msランプで位相連続）を siren.py に追加
+- 全ステップスクリプトに `--peepo` フラグ（出力先 out/clip_peepo/, out/figures_peepo/）
+- PSELDNets への配置先は同じ datasets/outdoor1clip/（上書き＝最後に配置した版が学習対象）
+- 動機: 音程が階段状なのでドップラーシフトが平行移動として最も見やすい（ゼミ説明用）
+- 実行結果 (2026-07-11): 貫通成功。train loss 0.0329→0.0226、
+  val ER 0.000 / F 100% / LE 10.8° / LR 100% / SELD_scr 0.015（epoch15）
+- サニティ2は wail と同一（az中央0.31°/最大0.96°。軌道同一なので当然）
+- スペクトログラム: 接近中ピー≈989Hz→後退≈933Hz の段差が明瞭（figures_peepo/）
+
+## データセット v1: outdoor_siren_v1（2026-07-11 完成）
+- train 30 / val 10（fold1_room1 / fold2_room1）、サイレン1クラス、条件乱数（シード20260711）
+  側とサイレン型は交互割当で均衡。条件全記録 = work/*/scene.json + inspection.csv
+- **高速レンダラ fastsim.py 導入**: DynamicSoundと同一物理のベクトル化実装。
+  DynamicSound実出力6本との波形一致 rel_rms=3.2〜3.4e-5（約-90dB）で等価性検証済み
+  （tests/test_fastsim.py、DS参照波形は work/mix001-003/mono_*_DSref.wav に保全）。
+  速度 約330倍（1本2.6秒）。step6 は fastsim 既定、--dynamicsound で旧経路
+- 全40本の自動検品 PASS（IV法DOA vs ラベル: az中央誤差0.22〜0.28°、最大1.4°）
+- Colab用 zip: out/dataset_outdoor_siren_v1.zip（36.6MB、datasets/構成、tsv同梱）
+- Colabノートブック: colab/PSELDNets_outdoor_siren_v1_Colab.ipynb（v3レシピ踏襲、
+  Drive永続化＋固定experiment_name＋自動resume、batch_size=8、70ep）
+- 次: ユーザーが zip を Drive の MyDrive/PSELDNets_data/ へ→ノートブック実行

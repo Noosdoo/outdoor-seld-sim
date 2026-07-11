@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CLIP = ROOT / "out" / "clip"
+CLIP = ROOT / "out" / ("clip_peepo" if "--peepo" in sys.argv else "clip")
 PSELD = ROOT.parent / "PSELDNet" / "PSELDNets"
 DS = PSELD / "datasets"
 

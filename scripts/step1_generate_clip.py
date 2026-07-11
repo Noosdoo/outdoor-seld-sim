@@ -18,7 +18,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-OUT = ROOT / "out" / "clip"
+PEEPO = "--peepo" in sys.argv
+OUT = ROOT / "out" / ("clip_peepo" if PEEPO else "clip")
 OUT.mkdir(parents=True, exist_ok=True)
 
 import tqdm as _tqdm_mod  # noqa: E402
@@ -28,15 +29,16 @@ _tqdm_mod.tqdm = lambda iterable=None, **kw: iterable  # type: ignore
 import soundfile as sf  # noqa: E402
 
 from outdoor_seld.scene import SceneConfig, run_mono_sim  # noqa: E402
-from outdoor_seld.siren import make_siren  # noqa: E402
+from outdoor_seld.siren import make_peepo_siren, make_siren  # noqa: E402
 
 
 def main():
-    scene = SceneConfig()
+    scene = SceneConfig(siren_type="peepo" if PEEPO else "wail")
     scene.save_json(OUT / "scene_config.json")
 
     # ドライ音源（クリップ長と同じ10秒。放射時刻 te は常に < clip_len なので足りる）
-    dry = make_siren(scene.clip_len_sec, scene.fs_sim)
+    gen = make_peepo_siren if scene.siren_type == "peepo" else make_siren
+    dry = gen(scene.clip_len_sec, scene.fs_sim)
     dry_path = OUT / "siren_dry_48k.wav"
     sf.write(dry_path, dry.astype(np.float32), scene.fs_sim)
     print(f"dry siren: {dry_path.name} rms={np.sqrt(np.mean(dry**2)):.4f} "

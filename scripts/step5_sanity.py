@@ -20,8 +20,9 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-CLIP = ROOT / "out" / "clip"
-FIG = ROOT / "out" / "figures"
+PEEPO = "--peepo" in sys.argv
+CLIP = ROOT / "out" / ("clip_peepo" if PEEPO else "clip")
+FIG = ROOT / "out" / ("figures_peepo" if PEEPO else "figures")
 FIG.mkdir(parents=True, exist_ok=True)
 
 import tqdm as _tqdm_mod  # noqa: E402
@@ -169,7 +170,8 @@ def spectrograms():
 
 
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "all"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    mode = args[0] if args else "all"
     if mode in ("all", "1"):
         sanity1_static_side()
     if mode in ("all", "2"):

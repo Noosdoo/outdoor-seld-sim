@@ -37,6 +37,7 @@ class SceneConfig:
     r0_m: float = 1.0
     # 音源
     source_gain_db: float = 0.0
+    siren_type: str = "wail"     # "wail"（うねり型）| "peepo"（ピーポー2音交互）
     class_name: str = "Siren"
     class_idx: int = 4           # cls_indices_train.tsv の行順（0始まり）で Siren=4
     ground_z: float = 0.0        # 反射面 z=0

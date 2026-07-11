@@ -18,7 +18,7 @@ import soundfile as sf
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-OUT = ROOT / "out" / "clip"
+OUT = ROOT / "out" / ("clip_peepo" if "--peepo" in sys.argv else "clip")
 
 from outdoor_seld.foa import encode_foa_timevarying  # noqa: E402
 from outdoor_seld.geometry import (SOUND_SPEED_20C, apparent_azel_deg,  # noqa: E402

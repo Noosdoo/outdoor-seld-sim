@@ -59,12 +59,30 @@ cd C:\Users\satos\research\outdoor_seld_e2e
 & $GEN scripts/step5_sanity.py all
 ```
 
+### バリアント: ピーポー型サイレン（`--peepo`）
+
+Step 1〜5 の各スクリプトに `--peepo` を付けると、うねり型（wail）の代わりに
+「ピーポー」型（960/770 Hz を各0.65秒で交互、日本の救急車）で同じシーンを生成する。
+音程が階段状なのでドップラーが最も見やすい。出力は `out/clip_peepo/`・`out/figures_peepo/`
+に分離され、wail 版の成果物は残る。PSELDNets 側の配置先は同じ
+`datasets/outdoor1clip/`（＝上書き。最後に配置した版が学習対象になる）。
+
+```powershell
+& $GEN scripts/step1_generate_clip.py --peepo
+& $GEN scripts/step2_encode_foa.py --peepo
+& $GEN scripts/step3_make_labels.py --peepo
+& $GEN scripts/step4_place_dataset.py --peepo
+# 以降の preproc / --fix-index / train / step5 は wail 版と同じ（step5 は --peepo 付き）
+```
+
 ## 貫通結果（2026-07-11、1クリップ過学習デモ・数値は参考値）
 
-- 学習: train loss 0.0329 → 0.0204（15エポック単調減少、1エポック=1ステップ）
-- 検証指標（epoch 5→10→15）:
-  ER 1.000→0.800→**0.400**、F −→26.7→**66.7%**、LE −→21.8→**10.5°**、
-  LR −→50.0→**80.0%**、SELD_scr 1.000→0.539→**0.248**
+- wail版: train loss 0.0329 → 0.0204（15エポック単調減少、1エポック=1ステップ）。
+  検証指標（epoch 5→10→15）: ER 1.000→0.800→**0.400**、F −→26.7→**66.7%**、
+  LE −→21.8→**10.5°**、LR −→50.0→**80.0%**、SELD_scr 1.000→0.539→**0.248**
+- peepo版: train loss 0.0329 → 0.0226（単調減少）。検証指標（epoch 15）:
+  **ER 0.000、F 100.0%、LE 10.8°、LR 100.0%、SELD_scr 0.015**
+  （E_SELD = ¼[ER + (1−F) + LE/180 + (1−LR)] の検算と一致）
 - 音とラベルの整合（サニティチェック2）: インテンシティベクトル法DOA vs ラベル
   **方位角 中央絶対誤差 0.31°（最大 0.96°）、仰角 0.26°**
 - FOA 規約（サニティチェック1）: az=+90° 静止音源で Y/W=1.000000, X=Z=0（E2E確認）
