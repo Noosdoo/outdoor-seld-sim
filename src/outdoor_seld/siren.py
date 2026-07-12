@@ -20,23 +20,25 @@ def make_peepo_siren(duration_sec: float, fs: int, f_hi: float = 960.0,
     """
     n = int(round(duration_sec * fs))
     t = np.arange(n) / fs
-    pos = (t % (2.0 * tone_sec)) / tone_sec   # 0..2 (0-1: ピー, 1-2: ポー)
-    frac = pos % 1.0                          # 各トーン内での位置 0..1
+    pos = (t % (2.0 * tone_sec)) / tone_sec   # 0..2 (0-1: ピー, 1-2: ポー)。2音1周期の中の位置
+    frac = pos % 1.0                          # 各トーン内での位置 0..1（今のトーンの何%地点か）
+    # トーン切り替え直後(cross_sec間)だけ0→1で滑らかに遷移させる比率
     ramp = np.clip(frac / (cross_sec / tone_sec), 0.0, 1.0)
-    in_hi = pos < 1.0
-    f_prev = np.where(in_hi, f_lo, f_hi)      # 直前のトーン
-    f_cur = np.where(in_hi, f_hi, f_lo)       # いまのトーン
-    f_inst = f_prev + (f_cur - f_prev) * ramp
+    in_hi = pos < 1.0                          # 前半(0-1)が「ピー」、後半(1-2)が「ポー」
+    f_prev = np.where(in_hi, f_lo, f_hi)      # 直前のトーン（切り替わる前の周波数）
+    f_cur = np.where(in_hi, f_hi, f_lo)       # いまのトーン（切り替わった後の周波数）
+    f_inst = f_prev + (f_cur - f_prev) * ramp  # rampで前後を線形補間＝瞬時周波数
+    # 周波数を積分して位相にする（瞬時周波数が変化しても位相が連続でクリックが出ない）
     phase = 2.0 * np.pi * np.cumsum(f_inst) / fs
-    x = (1.00 * np.sin(phase)
-         + 0.50 * np.sin(2.0 * phase)
-         + 0.25 * np.sin(3.0 * phase))
-    fade = int(0.01 * fs)
+    x = (1.00 * np.sin(phase)              # 基本波
+         + 0.50 * np.sin(2.0 * phase)      # 第2倍音
+         + 0.25 * np.sin(3.0 * phase))     # 第3倍音
+    fade = int(0.01 * fs)                   # 10msのフェード長
     env = np.ones(n)
-    env[:fade] = np.linspace(0.0, 1.0, fade)
-    env[-fade:] = np.linspace(1.0, 0.0, fade)
+    env[:fade] = np.linspace(0.0, 1.0, fade)   # クリップ先頭のフェードイン
+    env[-fade:] = np.linspace(1.0, 0.0, fade)  # クリップ末尾のフェードアウト（クリック防止）
     x = x * env
-    return peak * x / np.max(np.abs(x))
+    return peak * x / np.max(np.abs(x))         # ピーク値をpeakに正規化して返す
 
 
 def make_siren(duration_sec: float, fs: int, f_lo: float = 650.0,
@@ -45,11 +47,11 @@ def make_siren(duration_sec: float, fs: int, f_lo: float = 650.0,
     """wail サイレンのモノラル信号を返す (float64, peak 正規化)。"""
     n = int(round(duration_sec * fs))
     t = np.arange(n) / fs
-    f_center = 0.5 * (f_lo + f_hi)
-    f_dev = 0.5 * (f_hi - f_lo)
-    # 基本周波数の時間変化（正弦LFO）
+    f_center = 0.5 * (f_lo + f_hi)   # 周波数スイープの中心
+    f_dev = 0.5 * (f_hi - f_lo)      # 中心からの振れ幅
+    # 基本周波数の時間変化（正弦LFOでf_loとf_hiの間をなめらかに往復）
     f_inst = f_center + f_dev * np.sin(2.0 * np.pi * t / sweep_period_sec - np.pi / 2)
-    phase = 2.0 * np.pi * np.cumsum(f_inst) / fs
+    phase = 2.0 * np.pi * np.cumsum(f_inst) / fs   # 瞬時周波数を積分して連続位相にする
     x = (1.00 * np.sin(phase)
          + 0.50 * np.sin(2.0 * phase)
          + 0.25 * np.sin(3.0 * phase))

@@ -20,25 +20,25 @@ import numpy as np
 def colored_noise(n: int, fs: int, rng: np.random.Generator,
                   slope: float = 1.0, f_lo: float = 20.0) -> np.ndarray:
     """単位分散の有色雑音（パワースペクトル ∝ f^-slope、f_lo未満は0）。"""
-    white = rng.standard_normal(n)
-    spec = np.fft.rfft(white)
+    white = rng.standard_normal(n)         # まず普通のホワイトノイズを作る
+    spec = np.fft.rfft(white)              # 周波数領域に変換
     f = np.fft.rfftfreq(n, 1.0 / fs)
     shape = np.zeros_like(f)
-    band = f >= f_lo
-    shape[band] = (f[band] / 1000.0) ** (-slope / 2.0)
-    x = np.fft.irfft(spec * shape, n=n)
-    return x / np.std(x)
+    band = f >= f_lo                       # 20Hz未満は0のまま（遮断）にする
+    shape[band] = (f[band] / 1000.0) ** (-slope / 2.0)   # 振幅は周波数の-slope/2乗に比例させる
+    x = np.fft.irfft(spec * shape, n=n)    # 整形したスペクトルを時間領域に戻す
+    return x / np.std(x)                   # 標準偏差1に正規化（あとでSNR調整しやすくするため）
 
 
 def diffuse_foa_noise(n: int, fs: int, rng: np.random.Generator,
                       slope: float = 1.0) -> np.ndarray:
     """等方拡散音場の FOA 雑音 (4, n)。W が単位分散、Y/Z/X はパワー1/3。"""
-    w = colored_noise(n, fs, rng, slope)
-    g = 1.0 / np.sqrt(3.0)
-    y = g * colored_noise(n, fs, rng, slope)
+    w = colored_noise(n, fs, rng, slope)       # W chの雑音
+    g = 1.0 / np.sqrt(3.0)                     # パワーを1/3にするための振幅ゲイン
+    y = g * colored_noise(n, fs, rng, slope)   # 各chは独立な乱数列（rngを都度呼ぶので別系列）
     z = g * colored_noise(n, fs, rng, slope)
     x = g * colored_noise(n, fs, rng, slope)
-    return np.stack([w, y, z, x], axis=0)
+    return np.stack([w, y, z, x], axis=0)      # チャンネル順はFOA規約と同じW,Y,Z,X
 
 
 def mix_at_snr(foa_clean: np.ndarray, foa_noise_unit: np.ndarray,
@@ -50,8 +50,9 @@ def mix_at_snr(foa_clean: np.ndarray, foa_noise_unit: np.ndarray,
         noise_gain: 雑音に掛けたゲイン（記録用）
     """
     assert foa_clean.shape == foa_noise_unit.shape
-    p_sig = float(np.mean(foa_clean[0] ** 2))
-    p_noise_unit = float(np.mean(foa_noise_unit[0] ** 2))
+    p_sig = float(np.mean(foa_clean[0] ** 2))          # 信号(W)の平均パワー
+    p_noise_unit = float(np.mean(foa_noise_unit[0] ** 2))  # 雑音(単位振幅版)の平均パワー
+    # 目標SNRになるように雑音のゲインを逆算する（dB→比率に変換して解く）
     noise_gain = float(np.sqrt(p_sig / (p_noise_unit * 10.0 ** (snr_db / 10.0))))
     return foa_clean + noise_gain * foa_noise_unit, noise_gain
 
@@ -59,5 +60,5 @@ def mix_at_snr(foa_clean: np.ndarray, foa_noise_unit: np.ndarray,
 def measure_snr_db(foa_clean: np.ndarray, foa_noisy: np.ndarray) -> float:
     """2つのファイルから実SNR（W基準）を独立に測る（検品用）。"""
     p_sig = float(np.mean(foa_clean[0] ** 2))
-    p_noise = float(np.mean((foa_noisy[0] - foa_clean[0]) ** 2))
+    p_noise = float(np.mean((foa_noisy[0] - foa_clean[0]) ** 2))  # 差分＝混ざった雑音そのもの
     return 10.0 * np.log10(p_sig / p_noise)

@@ -37,22 +37,23 @@ def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
         debug: dict {t_frames, az, el, te, dist}（可視化用の連続値）
     """
     n_frames = int(round(clip_len_sec / label_res))
-    t_frames = (np.arange(n_frames) + 0.5) * label_res
+    t_frames = (np.arange(n_frames) + 0.5) * label_res   # 各フレームの代表(中心)時刻
+    # 音とFOAエンコードで使うのと同じ関数を呼ぶ＝方向がズレない一番の理由
     az, el, te, dist = apparent_azel_deg(t_frames, waypoints, receiver_pos, c)
 
-    active = np.isfinite(az)
-    active &= te >= source_active_from
+    active = np.isfinite(az)                 # 音がまだ届いていない(NaN)フレームは除外
+    active &= te >= source_active_from       # 発音開始前に発射された音は無視（v3のスパース発音用）
     if source_active_until is not None:
-        active &= te <= source_active_until
+        active &= te <= source_active_until  # 発音終了後に発射された音も無視
 
     rows = []
     for k in range(n_frames):
         if not active[k]:
-            continue
-        az_i = int(np.rint(az[k]))
+            continue                          # 無音フレームはCSVに行を書かない
+        az_i = int(np.rint(az[k]))            # DCASE規約に合わせて整数角度に丸める
         el_i = int(np.rint(el[k]))
         if az_i == 180:
-            az_i = -180
+            az_i = -180                       # 範囲を(-180,180]に統一（180は-180と同じ意味）
         rows.append((k, class_idx, track_idx, az_i, el_i))
     debug = {"t_frames": t_frames, "az": az, "el": el, "te": te, "dist": dist}
     return rows, debug
@@ -62,7 +63,7 @@ def write_dcase_csv(path, rows):
     """行リストを DCASE メタデータ CSV として書き出す。"""
     with open(path, "w", newline="\n") as f:
         for frame, cls, track, az, el in rows:
-            f.write(f"{frame},{cls},{track},{az},{el}\n")
+            f.write(f"{frame},{cls},{track},{az},{el}\n")   # ヘッダなし・カンマ区切り5列
 
 
 def read_dcase_csv(path):
@@ -75,6 +76,7 @@ def read_dcase_csv(path):
                 continue
             vals = line.split(",")
             frame = int(vals[0])
+            # 同じフレームに複数音源(複数行)がありうるのでリストに追加していく
             out.setdefault(frame, []).append(
                 (int(vals[1]), float(vals[3]), float(vals[4])))
     return out

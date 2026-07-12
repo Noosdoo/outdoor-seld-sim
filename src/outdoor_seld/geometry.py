@@ -24,17 +24,22 @@ from __future__ import annotations
 
 import numpy as np
 
-# DynamicSound acoustics.standards.ISO_9613_1_1993 と同一
+# DynamicSound acoustics.standards.ISO_9613_1_1993 と同一の基準音速
 SOUND_SPEED_20C = 343.2  # [m/s] at 20 degC
 
 
 def sound_speed(temperature_c: float) -> float:
     """気温[degC]から音速[m/s]。DynamicSound の式 c=343.2*sqrt(TK/293.15) と同一。"""
+    # 絶対温度に変換してから基準(293.15K=20degC)との比の平方根をかけるだけ
     return SOUND_SPEED_20C * np.sqrt((temperature_c + 273.15) / 293.15)
 
 
 def solve_emission_times(tr, waypoints, receiver_pos, c=SOUND_SPEED_20C):
     """受信時刻列 tr に対する放射時刻 te と放射位置 ps(te) を求める（ベクトル化）。
+
+    「マイクが時刻trに音を受け取るには、音源は過去のいつ（te）その音を出したか」
+    を解く。音源が動いているので te は単純な距離/音速の引き算では求まらず、
+    音源軌道の区分（セグメント）ごとに2次方程式を解く必要がある。
 
     Args:
         tr: (N,) 受信時刻 [s]
@@ -51,37 +56,44 @@ def solve_emission_times(tr, waypoints, receiver_pos, c=SOUND_SPEED_20C):
     pr = np.asarray(receiver_pos, dtype=np.float64)
     assert wp.ndim == 2 and wp.shape[1] == 4, "waypoints must be (M,4): [t,x,y,z]"
 
+    # 最終的な答え。まだ解けていないところはNaNのまま（＝音が未到達）
     te = np.full(tr.shape, np.nan)
     ps_te = np.full(tr.shape + (3,), np.nan)
 
+    # 軌道は折れ線なので、区間(セグメント)ごとに「その区間内で等速直線運動」とみなして解く
     for i in range(len(wp) - 1):
-        t0, t1 = wp[i, 0], wp[i + 1, 0]
-        p0, p1 = wp[i, 1:4], wp[i + 1, 1:4]
-        v = (p1 - p0) / (t1 - t0)
-        d0 = pr - p0
+        t0, t1 = wp[i, 0], wp[i + 1, 0]          # この区間の開始・終了時刻
+        p0, p1 = wp[i, 1:4], wp[i + 1, 1:4]       # この区間の開始・終了位置
+        v = (p1 - p0) / (t1 - t0)                 # この区間での音源速度ベクトル
+        d0 = pr - p0                              # 区間開始時点でのマイク→音源始点の相対位置
 
-        # 論文 Eq.(12): A te'^2 + B te' + C = 0, te' = te - t0
-        A = float(v @ v) - c * c
+        # 論文 Eq.(12): A te'^2 + B te' + C = 0 （te' = te - t0 を解く。te'なら数値が0付近で安定する）
+        A = float(v @ v) - c * c                  # |v|^2 - c^2（音速との速度差）
         B = 2.0 * (c * c * (tr - t0) - float(d0 @ v))
         C = float(d0 @ d0) - (c * (tr - t0)) ** 2
 
+        # まだ解けておらず、かつこの区間が受信時刻より前に始まっている行だけを対象にする
         unresolved = np.isnan(te) & (tr >= t0)
-        if abs(A) < 1e-12:  # |v| == c の退化ケース（通常起きない）
+        if abs(A) < 1e-12:  # |v| == c の退化ケース（音速と同じ速さで動く。通常起きない）
+            # 2次式でなく1次式 B*te'+C=0 として解く
             with np.errstate(divide="ignore", invalid="ignore"):
                 cand = np.where(B != 0.0, -C / B, np.nan) + t0
+            # 解がこのセグメントの時間範囲内かつ因果的(未来の発射でない)ものだけ採用
             ok = unresolved & (cand >= t0) & (cand < t1) & (cand <= tr)
             te[ok] = cand[ok]
         else:
-            disc = B * B - 4.0 * A * C
+            disc = B * B - 4.0 * A * C             # 判別式
             with np.errstate(invalid="ignore"):
-                sq = np.sqrt(np.where(disc >= 0.0, disc, np.nan))
-            for sign in (-1.0, +1.0):
+                sq = np.sqrt(np.where(disc >= 0.0, disc, np.nan))  # 実解がない行はNaNのまま
+            for sign in (-1.0, +1.0):               # 2次方程式の解は2つ、両方試す
                 cand = (-B + sign * sq) / (2.0 * A) + t0
+                # 有効範囲: このセグメント内・かつ発射時刻が受信時刻を超えない(因果律)
                 ok = unresolved & np.isfinite(cand) \
                     & (cand >= t0) & (cand < t1) & (cand <= tr + 1e-12)
                 te[ok] = cand[ok]
-                unresolved &= np.isnan(te)
+                unresolved &= np.isnan(te)          # 採用した行は次のsignループで対象から外す
 
+        # このセグメントで解けた行について、放射時刻での音源位置も計算して保存
         solved_here = np.isfinite(te) & np.isnan(ps_te[:, 0]) & (te >= t0) & (te < t1)
         if np.any(solved_here):
             ps_te[solved_here] = p0[None, :] + (te[solved_here, None] - t0) * v[None, :]
@@ -100,18 +112,18 @@ def doa_unit_vectors(ps, receiver_pos):
     """
     ps = np.atleast_2d(np.asarray(ps, dtype=np.float64))
     pr = np.asarray(receiver_pos, dtype=np.float64)
-    d = ps - pr[None, :]
-    dist = np.linalg.norm(d, axis=1)
+    d = ps - pr[None, :]                          # マイクから音源への相対ベクトル
+    dist = np.linalg.norm(d, axis=1)               # その長さ＝距離
     with np.errstate(invalid="ignore", divide="ignore"):
-        u = d / dist[:, None]
+        u = d / dist[:, None]                      # 長さ1に正規化＝方向だけを取り出す
     return u, dist
 
 
 def unit_to_azel_deg(u):
     """単位方向ベクトル → (azimuth[deg], elevation[deg])。DCASE規約。"""
     u = np.atleast_2d(np.asarray(u, dtype=np.float64))
-    az = np.degrees(np.arctan2(u[:, 1], u[:, 0]))
-    el = np.degrees(np.arctan2(u[:, 2], np.hypot(u[:, 0], u[:, 1])))
+    az = np.degrees(np.arctan2(u[:, 1], u[:, 0]))              # y,xから水平角
+    el = np.degrees(np.arctan2(u[:, 2], np.hypot(u[:, 0], u[:, 1])))  # zと水平成分から仰角
     return az, el
 
 
@@ -119,6 +131,7 @@ def azel_deg_to_unit(az_deg, el_deg):
     """(azimuth[deg], elevation[deg]) → 単位方向ベクトル (N,3)。DCASE規約。"""
     az = np.deg2rad(np.atleast_1d(np.asarray(az_deg, dtype=np.float64)))
     el = np.deg2rad(np.atleast_1d(np.asarray(el_deg, dtype=np.float64)))
+    # 球面座標→直交座標の標準的な変換（unit_to_azel_degの逆変換）
     return np.stack(
         [np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)], axis=1)
 
@@ -126,12 +139,14 @@ def azel_deg_to_unit(az_deg, el_deg):
 def apparent_azel_deg(tr, waypoints, receiver_pos, c=SOUND_SPEED_20C):
     """受信時刻 tr における「見かけの方向」(放射時刻補正済みDOA) を返す。
 
+    音とラベルの両方がこの関数を呼ぶことで、方向のズレが起きない設計になっている。
+
     Returns:
         az, el: (N,) [deg]。音が未到達の時刻は NaN
         te: (N,) 放射時刻
         dist: (N,) 放射位置までの距離
     """
-    te, ps_te = solve_emission_times(tr, waypoints, receiver_pos, c)
-    u, dist = doa_unit_vectors(ps_te, receiver_pos)
-    az, el = unit_to_azel_deg(u)
+    te, ps_te = solve_emission_times(tr, waypoints, receiver_pos, c)  # まずいつ発射されたかを解く
+    u, dist = doa_unit_vectors(ps_te, receiver_pos)                  # その発射位置から方向ベクトルを作る
+    az, el = unit_to_azel_deg(u)                                     # 角度[deg]に変換
     return az, el, te, dist
