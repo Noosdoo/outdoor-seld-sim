@@ -156,3 +156,14 @@
   （同一シーンで音声だけ差し替え、ラベルは幾何のみで決まるため不変）
 - 評価は条件ごとに step7_error_anatomy.py を回し、miss@edge比率・fa@car比率等を横並び
 - **次: ゼミでスコープ合意 → Colabで4条件学習（各約15分）→ 誤り解剖を横並び表に**
+
+## v3 ドローン混入版の破棄と復元（2026-07-12）
+- ユーザーが車(suv_dirt_road.wav)＋ドローン(flying_drone.wav)混在の妨害音バリアントを試し、
+  `dataset_outdoor_siren_v3/`を上書き→80本PASSしたが不採用と判断→
+  `dataset_outdoor_siren_v3_BROKEN_carDrone_do_not_use/`にリネーム（車のみ版の音声/zipは消失、
+  labelとscene.jsonのみ git commit 43050d1 に残存。破棄の理由は未確認）
+- 現在の`scripts/step6_batch_scenes.py`はドローンコード無し・車のみに復帰済みだったため、
+  `gen 0-79`を再実行するだけで**車のみ版を完全復元**（決定論的乱数のため metadata/inspection.csv は
+  git版とバイト単位で一致、zip 165.5MBもPROGRESS記載値と一致）。BROKENフォルダとzipは削除済み
+- **まだgit commitしていない**（削除・復元はワーキングツリーの変更のみ）
+- 次: このzipをColabに再アップロードして学習し直す（ユーザーが実行）
