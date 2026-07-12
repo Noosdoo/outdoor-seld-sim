@@ -16,6 +16,7 @@ from .geometry import SOUND_SPEED_20C, apparent_azel_deg
 
 def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
                      class_idx: int, track_idx: int = 0,
+                     source_active_from: float = 0.0,
                      source_active_until: float | None = None,
                      label_res: float = 0.1, c: float = SOUND_SPEED_20C):
     """1音源分のフレームラベル行を生成する。
@@ -40,6 +41,7 @@ def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
     az, el, te, dist = apparent_azel_deg(t_frames, waypoints, receiver_pos, c)
 
     active = np.isfinite(az)
+    active &= te >= source_active_from
     if source_active_until is not None:
         active &= te <= source_active_until
 
