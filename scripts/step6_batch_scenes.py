@@ -20,9 +20,10 @@ inspect 時の scenes.csv に全記録）:
   python scripts/step6_batch_scenes.py gen 0-2       # index範囲を生成（両端含む）
   python scripts/step6_batch_scenes.py inspect       # 全生成済みクリップを自動検品
   python scripts/step6_batch_scenes.py pack          # Colab用 zip を作成
-  （既定はv3。--v1/--v2/--v4/--v5 で切替。v4=幹線道路版、v3と同じ妨害音/雑音レンジのまま
+  （既定はv3。--v1/--v2/--v4/--v5/--v6 で切替。v4=幹線道路版、v3と同じ妨害音/雑音レンジのまま
    速度・距離レンジだけ変更。v5=マルチクラス拡張版、対象をSiren/Horn/BackupBeep/BikeBell
    の4クラスに増やし、妨害音（車）もクリーン合成に置き換え（実録音不使用）。
+   v6=v5と同一構成でクラス毎データを4倍（train240/val80）にした増量版。
    いずれも新規フォルダに出力し、既存バージョンは一切上書きしない）
 """
 from __future__ import annotations
@@ -77,15 +78,22 @@ GLOBAL_SEED = 20260711
 #      妨害音（車）も実録音(suv_dirt_road.wav)からクリーン合成(engine.py)に置換
 #      （対象と妨害音の音質を揃え、質感の違いがショートカット手がかりになるのを防ぐ。
 #      2026-07-12 追加、本人指示）。
+# v6 = v5と完全同一の構成・レンジで、クラス毎データだけ4倍（各クラスtrain60/val20、
+#      計320本）。v5誤り解剖の発見（疎発音クラスのdir_err集中）が「クラス毎データ不足
+#      （v5はv3の1/4）」で消えるか「本質的限界」かを切り分ける増量版（2026-07-13 追加）。
 V1 = "--v1" in sys.argv
 V2 = "--v2" in sys.argv
 V4 = "--v4" in sys.argv
 V5 = "--v5" in sys.argv
-VARIANT = "v1" if V1 else ("v2" if V2 else ("v4" if V4 else ("v5" if V5 else "v3")))
+V6 = "--v6" in sys.argv
+VARIANT = ("v1" if V1 else ("v2" if V2 else ("v4" if V4 else
+           ("v5" if V5 else ("v6" if V6 else "v3")))))
+MULTICLASS = VARIANT in ("v5", "v6")   # 4クラス構成（クラス割当・合成妨害音・専用辞書）
 DS_NAME = f"outdoor_siren_{VARIANT}"
-N_TRAIN, N_VAL = (60, 20) if VARIANT in ("v3", "v4", "v5") else (30, 10)
+N_TRAIN, N_VAL = ((240, 80) if VARIANT == "v6" else
+                  (60, 20) if VARIANT in ("v3", "v4", "v5") else (30, 10))
 WITH_NOISE = VARIANT != "v1"
-SPARSE_INTERF = VARIANT in ("v3", "v4", "v5")
+SPARSE_INTERF = VARIANT in ("v3", "v4", "v5", "v6")
 # 速度・距離レンジ: v4だけ幹線道路想定に変更。他のレンジ(SNR/SIR/発音区間)はv3と揃えたまま
 # にして、「速度・距離だけを変数にする」比較にする（他の要因が同時に変わると土俵比較が汚れる）
 SPEED_RANGE_MPS = (15.0, 30.0) if VARIANT == "v4" else (5.0, 15.0)   # 54-108 / 18-54 km/h
@@ -98,11 +106,11 @@ CAR_WAV = (ROOT.parent / "dynamic-sound" / "examples" / "resources"
            / "sounds" / "suv_dirt_road.wav")  # 60s/48kHz/mono 実録（v3/v4のみ使用）
 DS = ROOT / "out" / f"dataset_{DS_NAME}"
 WORK = DS / "work"
-# v5だけ独自の4クラス辞書（プロジェクト内、実録音源に依存しない）。他は既存の屋外10クラス辞書
-CLS_SRC = ((ROOT / "configs" / "cls_indices_v5.tsv") if VARIANT == "v5" else
+# v5/v6は独自の4クラス辞書（プロジェクト内、実録音源に依存しない）。他は既存の屋外10クラス辞書
+CLS_SRC = ((ROOT / "configs" / "cls_indices_v5.tsv") if MULTICLASS else
            (ROOT.parent / "SELD-Data-Generator" / "database"
             / "seld_FSD50K_5_ov1_train" / "cls_indices.tsv"))
-# v5のマルチクラス設定（行順=class_idx、cls_indices_v5.tsvの並びと一致させること）
+# マルチクラス設定（行順=class_idx、cls_indices_v5.tsvの並びと一致させること）
 HAZARD_CLASSES = ["siren", "horn", "backup_beep", "bike_bell"]
 HAZARD_CLASS_IDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3}
 
@@ -138,8 +146,8 @@ def sample_interferer(idx: int) -> dict:
     t_cpa = float(rng.uniform(2.0, 8.0))
     z = float(rng.uniform(0.8, 1.3))
     x0 = -dirx * speed * t_cpa
-    # v5は妨害音もクリーン合成(engine.make_car_driveby)に置換、実録音は使わない
-    source = "synth_car_driveby" if VARIANT == "v5" else "suv_dirt_road.wav"
+    # v5/v6は妨害音もクリーン合成(engine.make_car_driveby)に置換、実録音は使わない
+    source = "synth_car_driveby" if MULTICLASS else "suv_dirt_road.wav"
     return {"offset_m": offset, "speed_mps": speed, "t_cpa_s": t_cpa,
             "src_z_m": z, "x_start": x0, "x_end": x0 + dirx * speed * 10.0,
             "sir_db": float(rng.uniform(*SIR_RANGE_DB)),
@@ -160,9 +168,9 @@ def sample_scene(idx: int) -> dict:
     rng = np.random.default_rng(GLOBAL_SEED * 1000 + idx)
     # 側は交互割当で train/val とも完全均衡にする（他は乱数）
     side = 1.0 if idx % 2 == 0 else -1.0
-    # v5のみ4クラス均等割当（idx%4）。他は常にsiren（既存v1-v4の割当式は変更しない＝
+    # v5/v6のみ4クラス均等割当（idx%4）。他は常にsiren（既存v1-v4の割当式は変更しない＝
     # 既に検証済みのv3/v4のシーンをbit単位で再現できるようにするため）
-    if VARIANT == "v5":
+    if MULTICLASS:
         hazard_class = HAZARD_CLASSES[idx % 4]
         siren_type = ("peepo" if (idx // 4) % 2 == 0 else "wail") if hazard_class == "siren" else "-"
     else:
@@ -196,8 +204,8 @@ def sample_scene(idx: int) -> dict:
         "speed_mps": speed, "dir_x": dirx, "t_cpa_s": t_cpa,
         "src_z_m": z, "x_start": x0, "x_end": x1,
         "hazard_class": hazard_class,
-        "class_idx": HAZARD_CLASS_IDX[hazard_class] if VARIANT == "v5" else 4,
-        "class_name": hazard_class if VARIANT == "v5" else "Siren",
+        "class_idx": HAZARD_CLASS_IDX[hazard_class] if MULTICLASS else 4,
+        "class_name": hazard_class if MULTICLASS else "Siren",
         "siren_type": siren_type, "siren_params": siren_params,
         "gain_db": float(rng.uniform(-6.0, 0.0)),
     }
@@ -302,7 +310,7 @@ def generate_clip(idx: int) -> None:
         if SPARSE_INTERF:
             # 妨害音: 車を別軌道で通過させ、独自の時変DOAでFOA化
             itf = sample_interferer(idx)
-            if VARIANT == "v5":
+            if MULTICLASS:
                 # クリーン合成の走行音（実録音は使わない、engine.py参照）
                 rng_itf_audio = np.random.default_rng(GLOBAL_SEED * 727999 + idx)
                 car10 = make_car_driveby(scene.clip_len_sec, scene.fs_sim,
@@ -601,4 +609,4 @@ if __name__ == "__main__":
         pack()
     else:
         print("usage: plan | gen A-B | preview A-B | inspect | pack"
-              "  [--v1|--v2|--v4|--v5] (default: v3)")
+              "  [--v1|--v2|--v4|--v5|--v6] (default: v3)")

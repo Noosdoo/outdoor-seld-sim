@@ -249,3 +249,86 @@
   `max_epochs`を70→**200**に変更して再学習（ノートブック更新済み、まだ未実行）
 - 次: run2の結果を見て、v3水準に近づけば学習不足が確認され、大差が残ればクラス別の
   難易度差を疑う（誤り解剖のマルチクラス対応が必要になる）
+
+## v5 run2の結果とマルチクラス誤り解剖（2026-07-13）
+- run2最終結果（200epoch、ベストckpt=epoch_114）: **ER 0.260 / F 77.3% / LE 14.1° /
+  SELD_scr 0.152**。run1（0.219）よりは改善したが v3（0.027）には遠く、
+  学習不足だけでは説明できない差が残った → 誤り解剖で内訳を特定
+- 手順はv3のときと同じ: Colabで `infer.py mode=test`（`experiment_name=infer_outdoor_siren_v5_run2`）
+  → Drive `runs/infer_outdoor_siren_v5_run2/submissions/` に検証20本の予測CSV
+  → Drive MCPで取得して `out/predictions_v5_run2/` に保存
+- 解剖スクリプト: **`scripts/step8_error_anatomy_mc.py`**（新規。step7はv3の記録として無傷で保存）。
+  クラス辞書をtsvから読む汎用設計で、フレームを ok / dir_err(>20°) / substitution
+  （別クラス予測がGT方向20°以内＝取り違え）/ miss / fa に分類。
+  合成偽予測による自己テストで5カテゴリの計数を検算済み（全PASS）
+- 軌跡図: **`scripts/step8b_trajectories.py`**（クラス別にdir_err最多クリップの
+  GT方位vs予測方位＋発音帯を描画）。出力はどちらも `out/figures_v5_analysis/`
+
+### 結果: 仮説3は棄却、仮説4は「missではなくdir_err」として形を変えて成立
+- **仮説3（周波数帯重複による取り違え）→ 棄却**: substitution は**全738 GTフレーム中0件**。
+  混同行列は完全対角（BackupBeep 1000Hz vs Siren peepo 960Hz でも混同なし）。
+  クラス識別はクリップ単位でも全20本正解 → SEDのクラス分類は問題ではない
+- **miss も主因ではない**: 全体21フレーム(2.8%)で、大半が発音区間の端±0.3s
+  （BackupBeep 7/12、BikeBell 4/5）。BikeBellのmiss率2.7%は仮説4が予想した
+  「チリンの合間の大量miss」ではなかった（モデルは合間も検出を維持=SEDは補間できている）
+- **主因は方向誤差（dir_err >20°）= 166フレーム(22.5%)**。クラス別の集中が明確:
+
+  | クラス | dir_err率 | LE中央値 | 音の性質 |
+  | --- | --- | --- | --- |
+  | Horn | 0.6% | 4.1° | 断続70%デューティ・倍音豊富 |
+  | Siren | 15% | 8.0° | 連続・スイープ |
+  | BikeBell | 32% | 14.0° | 2秒周期チリン・減衰（最疎） |
+  | BackupBeep | 44% | 19.4° | 0.5s on/off 純音1kHz |
+
+- **dir_errの機構（追加分析で確認）**:
+  - dir_errフレームは同クラスのokフレームよりクリーン音エネルギーが低い
+    （BackupBeep -6.2dB、BikeBell -9.6dB。連続音のSirenは差 0.6dBのみ）
+    → **発音の合間にSED検出は続くがDOAが漂う**
+  - dir_errの予測は妨害車の方向を向いていない（車±20°以内はokフレームと同率、
+    BikeBellは0%）→ 妨害車への吸い寄せではない
+  - 予測方位は「時間シフトしたGT位置」でほぼ説明できる（±3s探索で83-100%が20°以内に解消）。
+    BikeBellは**78%が過去位置**（中央値+0.5s遅れ＝最後のチリン方向に留まる）、
+    BackupBeep/Sirenは先行気味（スイープの平滑化・外挿）
+  - FAは46フレームと少ないが、BackupBeepのFAは10/15が車方向（純音は車騒音に釣られやすい）
+- **結論**: v5の劣化はクラス混同ではなく、**時間的に疎/狭帯域な音源の「発音合間の
+  DOA追跡」の問題**。移動音源では合間に方位が動くため、鳴った瞬間しか方位情報がない
+  BikeBell/BackupBeepでLEとdir_errが増える。これは屋外SELD特有の「移動×疎発音」の
+  相互作用で、卒論の考察の柱になる（静止音源のDCASE設定では起きにくい）
+- 対策の候補（未実施）: クラス毎データ増量、発音合間のラベル扱いの再考
+  （active窓を鳴っている瞬間だけに絞る等）、時間文脈の長いモデル/トラッキング後処理
+
+## データセット v6: outdoor_siren_v6（2026-07-13 着手、クラス毎データ4倍増量版）
+- **目的**: v5誤り解剖の発見（疎発音クラスのdir_err集中）が「クラス毎データ不足
+  （v5は各クラスtrain15本=v3の1/4）」で消えるか「本質的限界」かの切り分け。
+  ユーザーと選択肢（増量/ポリフォニー/歩行マイク）を比較して増量を採用（最短で
+  切り分けができ、実装追加ほぼゼロのため）
+- **構成**: v5と完全同一（4クラス・速度/距離/SNR/SIR/発音区間レンジ・クリーン合成妨害音・
+  クラス辞書cls_indices_v5.tsv）で、**件数のみ4倍: 各クラスtrain60/val20、計320本**
+- 実装: `scripts/step6_batch_scenes.py` に `--v6` 追加。`MULTICLASS = VARIANT in ("v5","v6")`
+  フラグを導入してv5分岐を共通化（v1-v5の生成条件はビット単位で不変なことを
+  `plan --v5` の出力と既存scene.jsonの突き合わせで回帰確認済み）
+- **v5とのデータ関係（再精査で確定、2026-07-13）**: 生成の決定論性により、v5の全80本
+  （train60＋val20）はv6のtrain(mix001-080)に**flac/metadataともビット単位で一致**して
+  含まれる（13ペアのMD5照合で確認）。v6のval(idx240-319)は未使用のseed領域なので
+  **v6内のtrain/valリークはない**。評価時の帰結:
+  - v6モデルをv5のvalで評価するのは不可（学習済みのため）
+  - v6のval 80本は**v5モデルも未見** → v5 run2 ckptとv6 ckptを同一val 80本で
+    ペア比較できる（切り分けの主比較はこれを使う）
+- Colabノートブック: `colab/PSELDNets_outdoor_siren_v6_Colab.ipynb`（新規作成、
+  EXP_NAME=`outdoor_siren_v6_run1`、**max_epochs=100**（train本数4倍で1epochの
+  ステップ数が4倍になるため。v5 run2のベストepoch114相当の総ステップには約30epochで到達、
+  余裕を見て100）。Driveへは手動アップロード（v4のMCPアップロード破損事故以降の運用）
+- 判定基準: v3水準（SELD_scr 0.027）まで改善→データ不足が主因 / LE14°前後のまま→
+  疎発音×移動の本質的限界として考察の柱に。全体指標だけでなく学習後に infer(mode=test)
+  → `step8_error_anatomy_mc.py --pred out/predictions_v6_run1 --ds out/dataset_outdoor_siren_v6`
+  でv5と横並び比較する
+- **生成完了（2026-07-13）**: 320本生成→**検品320本全PASS**（az中央誤差 最大0.576°、
+  閾値2.0°）。クラス分布 各80本均等、metadata全320本のクラス列がscene.jsonのclass_idxと
+  一致、val新領域(idx240-319)の割当式(idx%4)も全数確認。
+  zip: `out/dataset_outdoor_siren_v6.zip`（**637.2MB**、foa320+metadata320+4クラス辞書）
+- 再精査（本人依頼）の記録: ①git diffで変更8箇所のみ確認 ②plan --v5出力と既存scene.json
+  の一致で回帰確認 ③v5との重複80本のflac/metadata MD5照合13ペア全一致（決定論性の実証）
+- 次: zipをDriveの`PSELDNets_data/`へ手動アップロード →
+  `colab/PSELDNets_outdoor_siren_v6_Colab.ipynb` を上から実行（EXP_NAME=outdoor_siren_v6_run1、
+  100epoch、T4で60-90分見込み）→ infer(mode=test) → step8で誤り解剖をv5と横並び比較。
+  余裕があればv5 run2のckptでもv6 valにinferして同一80本のペア比較を取る
