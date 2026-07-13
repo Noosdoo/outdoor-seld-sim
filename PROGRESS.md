@@ -161,9 +161,91 @@
 - ユーザーが車(suv_dirt_road.wav)＋ドローン(flying_drone.wav)混在の妨害音バリアントを試し、
   `dataset_outdoor_siren_v3/`を上書き→80本PASSしたが不採用と判断→
   `dataset_outdoor_siren_v3_BROKEN_carDrone_do_not_use/`にリネーム（車のみ版の音声/zipは消失、
-  labelとscene.jsonのみ git commit 43050d1 に残存。破棄の理由は未確認）
+  labelとscene.jsonのみ git commit 43050d1 に残存）
+  **破棄の理由（2026-07-12 本人確認）**: 車とドローン(実録音)をクリップごとにランダムで
+  混ぜると、結果がどちらの音源に起因するか切り分けられず土俵がぶれるため。
+  → **設計原則**: 新しい音源要素を追加するときは、まずクリーン合成音源（siren.py方式）で
+  試す。実録音は土俵の解釈可能性を崩すリスクがあるので後回し・慎重導入とする
 - 現在の`scripts/step6_batch_scenes.py`はドローンコード無し・車のみに復帰済みだったため、
   `gen 0-79`を再実行するだけで**車のみ版を完全復元**（決定論的乱数のため metadata/inspection.csv は
   git版とバイト単位で一致、zip 165.5MBもPROGRESS記載値と一致）。BROKENフォルダとzipは削除済み
-- **まだgit commitしていない**（削除・復元はワーキングツリーの変更のみ）
-- 次: このzipをColabに再アップロードして学習し直す（ユーザーが実行）
+- git commit 済み（f5c2768「fix: v3データセットのdrone混入版を破棄し車のみ版を復元」）
+
+## Colab run1のNaN崩壊とrun2再学習（2026-07-12）
+- train.logを精査した結果、run1は7/11 11:04-11:17に正常完走（ER0.042/SELD0.030）していたが、
+  **翌日7/12 10:23に同じexperiment_name(run1)で再度学習が走り、val ER 0.604/LR 40.6%に崩壊
+  →直後にloss=nan**という事故が発覚。原因は自動resume機構（固定experiment_nameの
+  `last.ckpt`があれば自動続行）と、その間にDrive上のzipをcar+drone版で上書きしたことの
+  組み合わせ——**車のみで学習したckptに、途中からcar+drone分布のデータを食わせて再学習しようと
+  して破綻**したと推定（step6のresumeロジックが原因ではなく、データとckptの世代不一致が原因）
+- 対策: EXP_NAME を`outdoor_siren_v3_run2`に変更（1行の差分、ノートブック本体は無変更）して
+  ゼロから再学習 → **正常完走、NaN再発なし**
+- run2最終結果（epoch70）: **ER 0.042 / F 96.9% / LE 6.5° / LR 100% / SELD_scr 0.027**
+  （run1の0.042/96.4%/7.3°/100%/0.030とほぼ同一→車のみ版復元の正しさを再現性で裏付け）
+- 教訓: **固定experiment_name＋自動resumeは、Driveのzipを差し替えた後の再実行では危険**。
+  データを変えて学習し直すときは必ずexperiment_nameも変える（このプロジェクトのColab運用の
+  標準注意点として今後も適用）
+- Google Drive上のtrain.logは `mcp__claude_ai_Google_Drive__search_files` (`title contains
+  'train.log'`) → `download_file_content` で直接取得可能（ユーザーに貼ってもらう手間を省ける、
+  今後もColab結果確認に使える）
+
+次: このv3(car-only)ckpt/結果を基準として、ゼミでablation計画（out/ablation_plan_2026-07.md）の
+スコープ合意を取る
+
+## データセット v4: outdoor_siren_v4（2026-07-12 完成、土俵依存性の検証用）
+- v3と完全に同一構成（スパース発音2-6秒・車妨害音SIR0-15dB・背景雑音SNR0-20dB・train60/val20）で
+  **速度・距離レンジのみ変更**: 5-15m/s→**15-30m/s**、3-15m→**5-20m**（住宅街→幹線道路想定）
+- `scripts/step6_batch_scenes.py`に`--v4`フラグ追加（`SPEED_RANGE_MPS`/`OFFSET_RANGE_M`を
+  variant依存にして`sample_scene`/`sample_interferer`から参照）。v1/v2/v3のコード・データは無改変
+- 同じidxならv3/v4で乱数ストリームの消費順が同じため、側・サイレン型・タイミング・雑音条件は
+  v3と揃ったまま速度・距離だけが別レンジに再サンプルされる（意図した設計、疑似ペア構造）
+- 全80本検品PASS（az中央誤差0.21-0.34°）。zip: `out/dataset_outdoor_siren_v4.zip`（157.1MB）
+- ノートブック: `colab/PSELDNets_outdoor_siren_v4_Colab.ipynb`（v3と同一レシピ、
+  DATASET/EXP_NAME差し替え、experiment_name使い回し注意の警告を追記済み）。まだDriveには
+  アップロードしていない（ローカルのみ）
+- 次: zip+ノートブックをDriveにアップロードして学習（ユーザー実行）。ablationはv3・v4
+  それぞれで独立に実施し、物理要素の効き方が土俵で変わるかを比較する
+
+## Colab学習結果 v4（2026-07-12 完走、run1・NaNなし）
+- 最終(epoch70): **ER 0.042 / F 97.4% / LE 5.7° / LR 100% / SELD_scr 0.025**
+  （v3最終 ER0.042/F96.9%/LE6.5°/SELD_scr0.027 とほぼ同一、わずかに良好）
+  → **収束後の到達難易度は速度・距離レンジを変えても同程度**（第一の確認完了）
+- **一方、学習の立ち上がりはv3よりv4の方が明確に不安定**:
+  epoch5で ER1.000/F-100%/LE180°/LR-100%（ほぼ全滅、v3同時点はER0.427）、
+  epoch35でSELD_scr0.309とepoch25(0.228)より悪化する逆戻りもあり（v3では未観測）、
+  epoch50以降で急速に持ち直し収束
+- **新たな土俵依存性の切り口**: 「収束後の最終難易度」だけでなく「学習の立ち上がり方・
+  安定性」も土俵（速度・距離レンジ）で変わる可能性。ablation計画書に追記検討
+- ckpt/ログ: Drive `PSELDNets_logs/outdoor_siren_v4/runs/outdoor_siren_v4_run1/`
+  （run1のままNaN崩壊なし、experiment_name変更は不要だった）
+
+## データセット v5: outdoor_siren_v5（2026-07-13 完成、マルチクラス拡張）
+- v3と同一の土俵（速度5-15m/s・距離3-15m・SNR/SIR/発音区間レンジ）だが、検出対象を
+  Siren単独から**Siren/Horn/BackupBeep/BikeBellの4クラス**に拡張（idx%4で均等割当、
+  各20本）。クラス辞書は新規 `configs/cls_indices_v5.tsv`（プロジェクト内、外部依存なし）
+- **新規合成モジュール**: `src/outdoor_seld/alert_sounds.py`（クラクション・バック警告音・
+  自転車ベル）、`src/outdoor_seld/engine.py`（車の走行音、妨害音用）。全てクリーン合成、
+  実録音は不使用（`flying_drone.wav`・`suv_dirt_road.wav`とも使わない、本人指示）
+  - 初版は簡易な正弦波の合成で実物と質感が大きく乖離（本人指摘）→ 外部調査
+    （procedural engine sound synthesis、car horn diaphragm合成、bell modal synthesis
+    の技法）を踏まえて作り直し済み。エンジン音=気筒発火の準ノコギリ波+RPMゆらぎ+
+    路面ノイズ、クラクション=奇数次倍音のリード楽器的音色、ベル=非整数次倍音+warble
+  - プレビュー音源: `out/preview_v5_sounds/`
+- **バグ修正**: `make_bike_bell`初版は音がクリップ先頭付近でしか鳴らず、発音区間ウィンドウが
+  後半に来ると無音になる不具合があった → クリップ全体で周期的に鳴るよう修正
+  （horn/backup_beepは元から周期的で問題なし）
+- 全80本検品PASS、クラス分布20本×4クラス確認済み。zip: `out/dataset_outdoor_siren_v5.zip`
+  （159.9MB）
+- Colabノートブック作成済み: `colab/PSELDNets_outdoor_siren_v5_Colab.ipynb`
+
+## v5 run1の学習不足と200epoch再学習（2026-07-12）
+- run1（70epoch、v3と同じ設定を流用）の最終結果: **ER 0.396 / F 65.6% / LE 18.8° /
+  LR 96.7% / SELD_scr 0.219**（v3の0.042/96.9%/6.5°/0.027と比べて大幅に悪化）
+- **原因は「マルチクラスが本質的に難しい」ではなく学習不足と推定**: run1のSELD_scr推移が
+  epoch70時点でもまだ下降し続けており収束していなかった（v3/v4はepoch40-50で横ばいに
+  達していたのと対照的）。4クラスに均等分割したことで1クラスあたりの学習データが
+  v3(train60本)の1/4(train15本)になり、v3で妥当だった70epochでは足りなかったと推定
+- 対策: `EXP_NAME`を`outdoor_siren_v5_run2`に変更（run1のckptを引き継がない）、
+  `max_epochs`を70→**200**に変更して再学習（ノートブック更新済み、まだ未実行）
+- 次: run2の結果を見て、v3水準に近づけば学習不足が確認され、大差が残ればクラス別の
+  難易度差を疑う（誤り解剖のマルチクラス対応が必要になる）

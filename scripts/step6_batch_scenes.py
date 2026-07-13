@@ -4,8 +4,8 @@
 （シード固定＝再現可能。クリップごとの条件は work/<name>_scene.json と
 inspect 時の scenes.csv に全記録）:
   - 通過する側: 左(y>0) / 右(y<0)
-  - 横距離 |y|: 3〜15 m
-  - 速度: 5〜15 m/s (18〜54 km/h)
+  - 横距離 |y|: 3〜15 m（v4は5〜20m。OFFSET_RANGE_M参照）
+  - 速度: 5〜15 m/s (18〜54 km/h)（v4は15〜30m/s=54〜108km/h。SPEED_RANGE_MPS参照）
   - 進行方向: +x / −x
   - 最接近時刻 t_cpa: 3〜7 s
   - 音源高さ z: 0.8〜1.3 m
@@ -20,6 +20,10 @@ inspect 時の scenes.csv に全記録）:
   python scripts/step6_batch_scenes.py gen 0-2       # index範囲を生成（両端含む）
   python scripts/step6_batch_scenes.py inspect       # 全生成済みクリップを自動検品
   python scripts/step6_batch_scenes.py pack          # Colab用 zip を作成
+  （既定はv3。--v1/--v2/--v4/--v5 で切替。v4=幹線道路版、v3と同じ妨害音/雑音レンジのまま
+   速度・距離レンジだけ変更。v5=マルチクラス拡張版、対象をSiren/Horn/BackupBeep/BikeBell
+   の4クラスに増やし、妨害音（車）もクリーン合成に置き換え（実録音不使用）。
+   いずれも新規フォルダに出力し、既存バージョンは一切上書きしない）
 """
 from __future__ import annotations
 
@@ -41,6 +45,9 @@ _tqdm_mod.tqdm = lambda iterable=None, **kw: iterable  # type: ignore
 
 import soundfile as sf  # noqa: E402
 
+from outdoor_seld.alert_sounds import (make_backup_beep, make_bike_bell,  # noqa: E402
+                                       make_horn)
+from outdoor_seld.engine import make_car_driveby  # noqa: E402
 from outdoor_seld.fastsim import render_mono  # noqa: E402
 from outdoor_seld.foa import encode_foa_timevarying, intensity_vector_doa  # noqa: E402
 from outdoor_seld.geometry import (doa_unit_vectors, solve_emission_times,  # noqa: E402
@@ -61,24 +68,43 @@ GLOBAL_SEED = 20260711
 # v1 = クリーン（雑音なし、常時発音）
 # v2 = v1と同一40シーン＋拡散性背景雑音（SNR 0-20dB）
 # v3 = スパース発音（2-6秒だけ鳴る）＋車実録のラベルなし指向性妨害（SIR 0-15dB）
-#      ＋背景雑音。train60/val20。
+#      ＋背景雑音。train60/val20。速度5-15m/s・距離3-15m（住宅街想定）。
+# v4 = v3と同一構成（妨害音/雑音/発音窓のレンジは完全に同じ）で、速度・距離レンジのみ
+#      幹線道路想定に変更。「土俵（速度・距離レンジ）が変わるとablationの結論が変わるか」
+#      を検証するための第二の土俵（2026-07-12 追加、out/ablation_plan_2026-07.md 4.5節）。
+# v5 = v3と同一の土俵（速度・距離・雑音・妨害レンジ）だが、検出対象をSiren単独から
+#      Siren/Horn/BackupBeep/BikeBellの4クラスに拡張（マルチクラスSELD化）。
+#      妨害音（車）も実録音(suv_dirt_road.wav)からクリーン合成(engine.py)に置換
+#      （対象と妨害音の音質を揃え、質感の違いがショートカット手がかりになるのを防ぐ。
+#      2026-07-12 追加、本人指示）。
 V1 = "--v1" in sys.argv
 V2 = "--v2" in sys.argv
-VARIANT = "v1" if V1 else ("v2" if V2 else "v3")
+V4 = "--v4" in sys.argv
+V5 = "--v5" in sys.argv
+VARIANT = "v1" if V1 else ("v2" if V2 else ("v4" if V4 else ("v5" if V5 else "v3")))
 DS_NAME = f"outdoor_siren_{VARIANT}"
-N_TRAIN, N_VAL = (60, 20) if VARIANT == "v3" else (30, 10)
+N_TRAIN, N_VAL = (60, 20) if VARIANT in ("v3", "v4", "v5") else (30, 10)
 WITH_NOISE = VARIANT != "v1"
-SPARSE_INTERF = VARIANT == "v3"
+SPARSE_INTERF = VARIANT in ("v3", "v4", "v5")
+# 速度・距離レンジ: v4だけ幹線道路想定に変更。他のレンジ(SNR/SIR/発音区間)はv3と揃えたまま
+# にして、「速度・距離だけを変数にする」比較にする（他の要因が同時に変わると土俵比較が汚れる）
+SPEED_RANGE_MPS = (15.0, 30.0) if VARIANT == "v4" else (5.0, 15.0)   # 54-108 / 18-54 km/h
+OFFSET_RANGE_M = (5.0, 20.0) if VARIANT == "v4" else (3.0, 15.0)
 SNR_RANGE_DB = (0.0, 20.0)   # 背景雑音（W基準、v3ではサイレン発音区間基準）
 NOISE_SLOPE = 1.0            # ピンク雑音（パワー 1/f）
 SIR_RANGE_DB = (0.0, 15.0)   # サイレン対 妨害音（W基準、発音区間で定義）
 EVENT_DUR_RANGE = (2.0, 6.0)
 CAR_WAV = (ROOT.parent / "dynamic-sound" / "examples" / "resources"
-           / "sounds" / "suv_dirt_road.wav")  # 60s/48kHz/mono 実録
+           / "sounds" / "suv_dirt_road.wav")  # 60s/48kHz/mono 実録（v3/v4のみ使用）
 DS = ROOT / "out" / f"dataset_{DS_NAME}"
 WORK = DS / "work"
-CLS_SRC = (ROOT.parent / "SELD-Data-Generator" / "database"
-           / "seld_FSD50K_5_ov1_train" / "cls_indices.tsv")
+# v5だけ独自の4クラス辞書（プロジェクト内、実録音源に依存しない）。他は既存の屋外10クラス辞書
+CLS_SRC = ((ROOT / "configs" / "cls_indices_v5.tsv") if VARIANT == "v5" else
+           (ROOT.parent / "SELD-Data-Generator" / "database"
+            / "seld_FSD50K_5_ov1_train" / "cls_indices.tsv"))
+# v5のマルチクラス設定（行順=class_idx、cls_indices_v5.tsvの並びと一致させること）
+HAZARD_CLASSES = ["siren", "horn", "backup_beep", "bike_bell"]
+HAZARD_CLASS_IDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3}
 
 # 検品閾値
 INSPECT_AZ_MEDIAN_DEG = 2.0
@@ -103,20 +129,22 @@ def sample_event(idx: int) -> dict:
 
 
 def sample_interferer(idx: int) -> dict:
-    """妨害音（車）の軌道・SIR・切り出し位置（v3）。"""
+    """妨害音（車）の軌道・SIR・切り出し位置（v3/v4/v5）。"""
     rng = np.random.default_rng(GLOBAL_SEED * 104729 + idx)
     side = 1.0 if rng.random() < 0.5 else -1.0
-    offset = float(rng.uniform(3.0, 15.0)) * side
-    speed = float(rng.uniform(5.0, 15.0))
+    offset = float(rng.uniform(*OFFSET_RANGE_M)) * side
+    speed = float(rng.uniform(*SPEED_RANGE_MPS))
     dirx = 1.0 if rng.random() < 0.5 else -1.0
     t_cpa = float(rng.uniform(2.0, 8.0))
     z = float(rng.uniform(0.8, 1.3))
     x0 = -dirx * speed * t_cpa
+    # v5は妨害音もクリーン合成(engine.make_car_driveby)に置換、実録音は使わない
+    source = "synth_car_driveby" if VARIANT == "v5" else "suv_dirt_road.wav"
     return {"offset_m": offset, "speed_mps": speed, "t_cpa_s": t_cpa,
             "src_z_m": z, "x_start": x0, "x_end": x0 + dirx * speed * 10.0,
             "sir_db": float(rng.uniform(*SIR_RANGE_DB)),
             "excerpt_start_s": float(rng.uniform(0.0, 49.0)),
-            "source": "suv_dirt_road.wav"}
+            "source": source}
 
 
 def sample_noise(idx: int) -> dict:
@@ -130,11 +158,18 @@ def sample_noise(idx: int) -> dict:
 def sample_scene(idx: int) -> dict:
     """クリップ idx の条件を決定論的にサンプルする。"""
     rng = np.random.default_rng(GLOBAL_SEED * 1000 + idx)
-    # 側とサイレン型は交互割当で train/val とも完全均衡にする（他は乱数）
+    # 側は交互割当で train/val とも完全均衡にする（他は乱数）
     side = 1.0 if idx % 2 == 0 else -1.0
-    siren_type = "peepo" if (idx // 2) % 2 == 0 else "wail"
-    offset = float(rng.uniform(3.0, 15.0)) * side
-    speed = float(rng.uniform(5.0, 15.0))
+    # v5のみ4クラス均等割当（idx%4）。他は常にsiren（既存v1-v4の割当式は変更しない＝
+    # 既に検証済みのv3/v4のシーンをbit単位で再現できるようにするため）
+    if VARIANT == "v5":
+        hazard_class = HAZARD_CLASSES[idx % 4]
+        siren_type = ("peepo" if (idx // 4) % 2 == 0 else "wail") if hazard_class == "siren" else "-"
+    else:
+        hazard_class = "siren"
+        siren_type = "peepo" if (idx // 2) % 2 == 0 else "wail"
+    offset = float(rng.uniform(*OFFSET_RANGE_M)) * side
+    speed = float(rng.uniform(*SPEED_RANGE_MPS))
     dirx = 1.0 if rng.random() < 0.5 else -1.0
     t_cpa = float(rng.uniform(3.0, 7.0))
     z = float(rng.uniform(0.8, 1.3))
@@ -146,18 +181,23 @@ def sample_scene(idx: int) -> dict:
             "f_lo": 770.0 * float(rng.uniform(0.97, 1.03)),
             "tone_sec": 0.65 * float(rng.uniform(0.9, 1.1)),
         }
-    else:
+    elif siren_type == "wail":
         siren_params = {
             "f_lo": 650.0 * float(rng.uniform(0.95, 1.05)),
             "f_hi": 1450.0 * float(rng.uniform(0.95, 1.05)),
             "sweep_period_sec": 4.8 * float(rng.uniform(0.85, 1.15)),
         }
+    else:
+        siren_params = {}
     return {
         "idx": idx, "name": clip_name(idx),
         "split": "train" if idx < N_TRAIN else "val",
         "side": "L" if side > 0 else "R", "offset_m": offset,
         "speed_mps": speed, "dir_x": dirx, "t_cpa_s": t_cpa,
         "src_z_m": z, "x_start": x0, "x_end": x1,
+        "hazard_class": hazard_class,
+        "class_idx": HAZARD_CLASS_IDX[hazard_class] if VARIANT == "v5" else 4,
+        "class_name": hazard_class if VARIANT == "v5" else "Siren",
         "siren_type": siren_type, "siren_params": siren_params,
         "gain_db": float(rng.uniform(-6.0, 0.0)),
     }
@@ -170,6 +210,8 @@ def build_scene_config(s: dict) -> SceneConfig:
         src_end=(s["x_end"], s["offset_m"], s["src_z_m"]),
         siren_type=s["siren_type"],
         source_gain_db=s["gain_db"],
+        class_idx=s["class_idx"],
+        class_name=s["class_name"],
     )
 
 
@@ -183,9 +225,20 @@ def generate_clip(idx: int) -> None:
     (DS / "metadata").mkdir(parents=True, exist_ok=True)
     c = sound_speed(scene.temperature_c)
 
-    # 1) ドライ音源（v3: 発音区間 2-6 秒に窓掛け、20ms のフェード付き）
-    gen = make_peepo_siren if s["siren_type"] == "peepo" else make_siren
-    dry = gen(scene.clip_len_sec, scene.fs_sim, **s["siren_params"])
+    # 1) ドライ音源（v3以降: 発音区間 2-6 秒に窓掛け、20ms のフェード付き）
+    hazard_class = s.get("hazard_class", "siren")
+    if hazard_class == "siren":
+        gen = make_peepo_siren if s["siren_type"] == "peepo" else make_siren
+        dry = gen(scene.clip_len_sec, scene.fs_sim, **s["siren_params"])
+    elif hazard_class == "horn":
+        rng_dry = np.random.default_rng(GLOBAL_SEED * 610271 + idx)
+        dry = make_horn(scene.clip_len_sec, scene.fs_sim, rng_dry)
+    elif hazard_class == "backup_beep":
+        dry = make_backup_beep(scene.clip_len_sec, scene.fs_sim)
+    elif hazard_class == "bike_bell":
+        dry = make_bike_bell(scene.clip_len_sec, scene.fs_sim)
+    else:
+        raise ValueError(f"unknown hazard_class: {hazard_class}")
     if SPARSE_INTERF:
         ev = sample_event(idx)
         s["event"] = ev
@@ -247,13 +300,19 @@ def generate_clip(idx: int) -> None:
 
         mix = foa_direct.copy()
         if SPARSE_INTERF:
-            # 妨害音: 車の実録モノ音源を別軌道で通過させ、独自の時変DOAでFOA化
+            # 妨害音: 車を別軌道で通過させ、独自の時変DOAでFOA化
             itf = sample_interferer(idx)
-            car, car_sr = sf.read(CAR_WAV)
-            assert car_sr == scene.fs_sim, "car source must be 48 kHz"
-            e0 = int(itf["excerpt_start_s"] * car_sr)
-            car10 = np.asarray(car[e0:e0 + int(scene.clip_len_sec * car_sr)],
-                               np.float64)
+            if VARIANT == "v5":
+                # クリーン合成の走行音（実録音は使わない、engine.py参照）
+                rng_itf_audio = np.random.default_rng(GLOBAL_SEED * 727999 + idx)
+                car10 = make_car_driveby(scene.clip_len_sec, scene.fs_sim,
+                                         rng_itf_audio)
+            else:
+                car, car_sr = sf.read(CAR_WAV)
+                assert car_sr == scene.fs_sim, "car source must be 48 kHz"
+                e0 = int(itf["excerpt_start_s"] * car_sr)
+                car10 = np.asarray(
+                    car[e0:e0 + int(scene.clip_len_sec * car_sr)], np.float64)
             wp_i = np.array(
                 [[0.0, itf["x_start"], itf["offset_m"], itf["src_z_m"]],
                  [scene.clip_len_sec, itf["x_end"], itf["offset_m"],
@@ -329,9 +388,10 @@ def generate_clip(idx: int) -> None:
     s["scene_config"] = dataclasses.asdict(scene)
     (wdir / "scene.json").write_text(json.dumps(s, indent=2))
     snr_note = f" snr={s['noise']['snr_db']:.1f}dB" if WITH_NOISE else ""
+    label = s["siren_type"] if hazard_class == "siren" else hazard_class
     print(f"[gen {idx:02d}] {name} {s['split']} {s['side']} "
           f"|y|={abs(s['offset_m']):.1f}m v={s['speed_mps']:.1f}m/s "
-          f"{s['siren_type']} peak={s['stats']['foa_direct_peak']:.3f}"
+          f"{label} peak={s['stats']['foa_direct_peak']:.3f}"
           f"{snr_note} ({sim_sec:.0f}s)")
 
 
@@ -408,6 +468,7 @@ def inspect_all() -> int:
             "offset_m": round(s.get("offset_m", float("nan")), 2),
             "speed_mps": round(s.get("speed_mps", float("nan")), 2),
             "t_cpa_s": round(s.get("t_cpa_s", float("nan")), 2),
+            "hazard_class": s.get("hazard_class", "siren"),
             "siren_type": s.get("siren_type", "?"),
             "gain_db": round(s.get("gain_db", float("nan")), 2),
             "peak": round(peak, 4), "rms_W": round(rms_w, 5),
@@ -521,10 +582,11 @@ if __name__ == "__main__":
     if mode == "plan":
         for i in range(N_TRAIN + N_VAL):
             s = sample_scene(i)
+            label = s["hazard_class"] if s["hazard_class"] != "siren" else s["siren_type"]
             print(f"{i:02d} {s['name']} {s['split']:5s} {s['side']} "
                   f"|y|={abs(s['offset_m']):5.1f}m v={s['speed_mps']:4.1f}m/s "
                   f"dir={'+x' if s['dir_x']>0 else '-x'} tcpa={s['t_cpa_s']:.1f}s "
-                  f"z={s['src_z_m']:.2f} {s['siren_type']:5s} "
+                  f"z={s['src_z_m']:.2f} {label:12s} "
                   f"gain={s['gain_db']:+.1f}dB")
     elif mode == "gen":
         a, b = (sys.argv[2].split("-") + [sys.argv[2]])[:2]
@@ -539,4 +601,4 @@ if __name__ == "__main__":
         pack()
     else:
         print("usage: plan | gen A-B | preview A-B | inspect | pack"
-              "  [--v1|--v2] (default: v3)")
+              "  [--v1|--v2|--v4|--v5] (default: v3)")
