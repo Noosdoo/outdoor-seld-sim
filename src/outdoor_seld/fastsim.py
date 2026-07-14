@@ -31,7 +31,10 @@ FIR_LEN = 513  # DynamicSound と同一（大気吸収フィルタのタップ�
 def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
                 clip_len_sec: float, temperature_c: float = 20.0,
                 pressure_atm: float = 1.0, rel_humidity: float = 50.0,
-                gain_db: float = 0.0, block_len: int = 240) -> np.ndarray:
+                gain_db: float = 0.0, block_len: int = 240,
+                enable_doppler: bool = True,
+                enable_spreading: bool = True,
+                enable_air_absorption: bool = True) -> np.ndarray:
     """1音源×静止無指向1chマイクの物理適用済みモノラルを返す。
 
     Args:
@@ -41,6 +44,20 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
         fs: サンプリングレート [Hz]
         clip_len_sec: 出力長 [s]
         block_len: 大気吸収FIRの更新間隔（サンプル）
+        enable_doppler / enable_spreading / enable_air_absorption:
+            ablation用の物理スイッチ（既定は全ON=従来と完全同一の出力）。
+            - enable_doppler=False: ドライ読み出しを「一定遅延」（全サンプル共通の
+              中央値伝搬遅延）にする。時間伸縮（ピッチ変調）が消えるが、1/rと
+              大気吸収は放射時刻ベースの距離のまま時変で残る。
+              注意①: 静的RIR補間型の生成器（SpatialScaper等）も「ピッチ変調が
+              消える」点は同じだが、遅延の扱いは異なる（あちらは区分的時変遅延）。
+              「既存生成器の再現」とまでは言えない（レビューP10）。
+              注意②: 一定遅延のため音のオンセット受信時刻がラベル窓（放射時刻
+              基準）から最大0.1-0.3秒ずれる（レビューP1）。ablationでこの条件の
+              データセットを作る際はラベル側も同じ一定遅延規約で生成すること。
+            - enable_spreading=False: 幾何減衰 1/r を適用しない（距離によらず1倍）。
+            - enable_air_absorption=False: ISO 9613-1 の大気吸収FIRを適用しない。
+            地面反射のon/offは本関数の外（鏡像軌道レンダの加算有無）で制御する。
     """
     c = sound_speed(temperature_c)
     n = int(round(clip_len_sec * fs))
@@ -54,8 +71,22 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
 
     # ② ドライ読み出し（線形補間、loop=False 相当）
     dry = np.asarray(dry, dtype=np.float64) * 10.0 ** (gain_db / 20.0)  # dBをゲイン倍率に変換
-    pos = te * fs                            # 放射時刻をドライ音源のサンプル位置に変換
+    if enable_doppler:
+        pos = te * fs                        # 放射時刻をドライ音源のサンプル位置に変換
+    else:
+        # ドップラーoff: 全サンプル共通の一定遅延で読む（ピッチ変調が消える）。
+        # 遅延は伝搬遅延 tr-te の中央値（決定論・シーン依存）。距離由来の
+        # 振幅・吸収は下の③④で従来どおり時変のまま適用される
+        delay = tr - te
+        t0 = float(np.median(delay[np.isfinite(delay)])) if np.any(
+            np.isfinite(delay)) else 0.0
+        pos = (tr - t0) * fs
     valid = np.isfinite(pos) & (pos >= 0.0) & (pos < len(dry) - 1)  # 範囲内かつ解がある行だけ
+    if not enable_doppler:
+        # 未到達区間（te=NaN=音がまだ物理的に届いていない）はドップラーoffでも無音にする。
+        # これが無いと到達前のサンプルが素通しになり、1/rも掛からない
+        # （2026-07-14 敵対的レビューP2で発見・修正）
+        valid &= np.isfinite(te)
     i0 = np.zeros(n, dtype=np.int64)
     i0[valid] = np.floor(pos[valid]).astype(np.int64)   # 整数側の読み出し位置
     frac = np.zeros(n)
@@ -64,12 +95,19 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
     s[valid] = (1.0 - frac[valid]) * dry[i0[valid]] + frac[valid] * dry[i0[valid] + 1]
 
     # ③ 幾何減衰 1/r（距離0=マイクと同じ位置は特例で1倍のまま）
-    g = np.ones(n)
-    ok = valid & (dist > 0)
-    g[ok] = 1.0 / dist[ok]
-    s = s * g
+    if enable_spreading:
+        g = np.ones(n)
+        ok = valid & np.isfinite(dist) & (dist > 0)
+        g[ok] = 1.0 / dist[ok]
+        s = s * g
 
     # ④ 大気吸収（DSと同一の周波数グリッド・係数・FIR設計、ブロック毎に更新）
+    if not enable_air_absorption:
+        # 吸収off: FIRを通さない。ただしFIR(線形位相513タップ)の群遅延
+        # (FIR_LEN-1)/2=256サンプルだけonside出力は遅れるので、条件間で
+        # 波形タイミングが揃うよう同量のゼロ遅延を入れて返す
+        gd = (FIR_LEN - 1) // 2
+        return np.concatenate([np.zeros(gd), s[:-gd]]) if n > gd else s
     freqs = np.linspace(0.0, fs / 2.0, num=FIR_LEN - 1)   # 0〜ナイキストの周波数グリッド
     # ISO9613-1の式から各周波数の減衰係数[dB/m]を計算（DynamicSound自身の関数を流用）
     alpha = attenuation_coefficients(

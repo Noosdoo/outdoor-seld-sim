@@ -20,10 +20,11 @@ inspect 時の scenes.csv に全記録）:
   python scripts/step6_batch_scenes.py gen 0-2       # index範囲を生成（両端含む）
   python scripts/step6_batch_scenes.py inspect       # 全生成済みクリップを自動検品
   python scripts/step6_batch_scenes.py pack          # Colab用 zip を作成
-  （既定はv3。--v1/--v2/--v4/--v5/--v6 で切替。v4=幹線道路版、v3と同じ妨害音/雑音レンジのまま
+  （既定はv3。--v1/--v2/--v4/--v5/--v6/--v7 で切替。v4=幹線道路版、v3と同じ妨害音/雑音レンジのまま
    速度・距離レンジだけ変更。v5=マルチクラス拡張版、対象をSiren/Horn/BackupBeep/BikeBell
    の4クラスに増やし、妨害音（車）もクリーン合成に置き換え（実録音不使用）。
    v6=v5と同一構成でクラス毎データを4倍（train240/val80）にした増量版。
+   v7=v6と同一シーンで地面反射をON（対象・妨害車とも）にしたフル物理版=ablation基準。
    いずれも新規フォルダに出力し、既存バージョンは一切上書きしない）
 """
 from __future__ import annotations
@@ -81,19 +82,41 @@ GLOBAL_SEED = 20260711
 # v6 = v5と完全同一の構成・レンジで、クラス毎データだけ4倍（各クラスtrain60/val20、
 #      計320本）。v5誤り解剖の発見（疎発音クラスのdir_err集中）が「クラス毎データ不足
 #      （v5はv3の1/4）」で消えるか「本質的限界」かを切り分ける増量版（2026-07-13 追加）。
+# v7 = v6と完全同一のシーン・件数で、**地面反射（two-ray/像音源、剛体地面R=+1）をON**
+#      にしたフル物理版（対象音・妨害車の両方に適用）。ablationの基準土俵:
+#      「ここから物理要素を1つずつ外す」一要因設計の参照条件（2026-07-14 追加）。
+#      ラベルは従来どおり直接音の放射時刻DOA（=真の音源方向）。反射はIV仰角を
+#      中央値1.4-3.3°押し下げるが方位は不変（v6クリップで実測）→検品の仰角閾値のみ緩和
+# v8 = 敵対的レビュー（2026-07-14、out/adversarial_review_2026-07-14.md）の指摘を
+#      全て織り込んだ仕切り直し版（v7と数値の直接比較はしない、新しい土俵）:
+#      ①側×クラス独立化（side=(idx//4)%2, siren_type=(idx//8)%2。v5-v7の
+#        「siren/backup_beep全数左」交絡の修正） ②test fold新設（train240/val80/
+#        test80=idx320-399/fold3。最終報告はtestで1回だけ） ③SNR/SIR正規化基準を
+#        直接音Wに固定（反射条件でも共通=ablationを真の1要素差に） ④検品に
+#        実効SNR・帯域内SIR・全長SIRの記録列 ⑤全クラスに周波数±5%・時間構造±10%・
+#        車回転±20%のジッタ（「クラス識別完全は同一波形の産物」批判への対処）
+#      ⑥反射込みIV仰角バイアスのレンジゲート[-8,0]° ⑦基準物理=反射ON（理想剛面two-ray）
 V1 = "--v1" in sys.argv
 V2 = "--v2" in sys.argv
 V4 = "--v4" in sys.argv
 V5 = "--v5" in sys.argv
 V6 = "--v6" in sys.argv
+V7 = "--v7" in sys.argv
+V8 = "--v8" in sys.argv
 VARIANT = ("v1" if V1 else ("v2" if V2 else ("v4" if V4 else
-           ("v5" if V5 else ("v6" if V6 else "v3")))))
-MULTICLASS = VARIANT in ("v5", "v6")   # 4クラス構成（クラス割当・合成妨害音・専用辞書）
+           ("v5" if V5 else ("v6" if V6 else ("v7" if V7 else
+           ("v8" if V8 else "v3")))))))
+MULTICLASS = VARIANT in ("v5", "v6", "v7", "v8")  # 4クラス構成
+WITH_REFL = VARIANT in ("v7", "v8")         # 地面反射をデータセット音声に含める
+INDEP_SIDE = VARIANT == "v8"                # ①側×クラス独立化＋⑤全クラスジッタ
+SNR_BASIS_DIRECT = VARIANT == "v8"          # ③正規化基準を直接音Wに固定
 DS_NAME = f"outdoor_siren_{VARIANT}"
-N_TRAIN, N_VAL = ((240, 80) if VARIANT == "v6" else
-                  (60, 20) if VARIANT in ("v3", "v4", "v5") else (30, 10))
+N_TRAIN, N_VAL, N_TEST = ((240, 80, 80) if VARIANT == "v8" else
+                          (240, 80, 0) if VARIANT in ("v6", "v7") else
+                          (60, 20, 0) if VARIANT in ("v3", "v4", "v5") else
+                          (30, 10, 0))
 WITH_NOISE = VARIANT != "v1"
-SPARSE_INTERF = VARIANT in ("v3", "v4", "v5", "v6")
+SPARSE_INTERF = VARIANT in ("v3", "v4", "v5", "v6", "v7", "v8")
 # 速度・距離レンジ: v4だけ幹線道路想定に変更。他のレンジ(SNR/SIR/発音区間)はv3と揃えたまま
 # にして、「速度・距離だけを変数にする」比較にする（他の要因が同時に変わると土俵比較が汚れる）
 SPEED_RANGE_MPS = (15.0, 30.0) if VARIANT == "v4" else (5.0, 15.0)   # 54-108 / 18-54 km/h
@@ -113,8 +136,15 @@ CLS_SRC = ((ROOT / "configs" / "cls_indices_v5.tsv") if MULTICLASS else
 # マルチクラス設定（行順=class_idx、cls_indices_v5.tsvの並びと一致させること）
 HAZARD_CLASSES = ["siren", "horn", "backup_beep", "bike_bell"]
 HAZARD_CLASS_IDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3}
+# 帯域内SIR計測用のクラス主要帯域[Hz]（検品の記録列。レビューP4: 名目SIRは
+# 広帯域W基準のため、低域寄りの合成車に対して帯域内の実効SIRを11-25dB過小表示する）
+BAND_BY_CLASS = {"siren": (500.0, 1700.0), "horn": (300.0, 2600.0),
+                 "backup_beep": (850.0, 1200.0), "bike_bell": (2400.0, 11500.0)}
 
-# 検品閾値
+# 検品閾値。v7（反射ON）では反射がIV仰角を物理的に押し下げる（中央値1.4-3.3°、
+# 近距離・低音源高の裾では約8°に達する=320本検品で実測）ため、ラベル整合ゲートは
+# 「直接音成分のみのFOA（foa_direct_24k.flac）」に対して行い、閾値は全版共通のまま
+# にする（緩和でゲートを骨抜きにしない）。反射込み音声のIV仰角バイアスは既知物理
 INSPECT_AZ_MEDIAN_DEG = 2.0
 INSPECT_EL_MEDIAN_DEG = 2.0
 INSPECT_PEAK_MAX = 0.99
@@ -124,7 +154,16 @@ INSPECT_RMS_MIN = 1e-4
 def clip_name(idx: int) -> str:
     if idx < N_TRAIN:
         return f"fold1_room1_mix{idx + 1:03d}"
-    return f"fold2_room1_mix{idx - N_TRAIN + 1:03d}"
+    if idx < N_TRAIN + N_VAL:
+        return f"fold2_room1_mix{idx - N_TRAIN + 1:03d}"
+    # v8以降: 最終報告用のheld-out test（学習にもckpt選択にも使わない）
+    return f"fold3_room1_mix{idx - N_TRAIN - N_VAL + 1:03d}"
+
+
+def split_name(idx: int) -> str:
+    if idx < N_TRAIN:
+        return "train"
+    return "val" if idx < N_TRAIN + N_VAL else "test"
 
 
 def sample_event(idx: int) -> dict:
@@ -148,11 +187,15 @@ def sample_interferer(idx: int) -> dict:
     x0 = -dirx * speed * t_cpa
     # v5/v6は妨害音もクリーン合成(engine.make_car_driveby)に置換、実録音は使わない
     source = "synth_car_driveby" if MULTICLASS else "suv_dirt_road.wav"
-    return {"offset_m": offset, "speed_mps": speed, "t_cpa_s": t_cpa,
-            "src_z_m": z, "x_start": x0, "x_end": x0 + dirx * speed * 10.0,
-            "sir_db": float(rng.uniform(*SIR_RANGE_DB)),
-            "excerpt_start_s": float(rng.uniform(0.0, 49.0)),
-            "source": source}
+    out = {"offset_m": offset, "speed_mps": speed, "t_cpa_s": t_cpa,
+           "src_z_m": z, "x_start": x0, "x_end": x0 + dirx * speed * 10.0,
+           "sir_db": float(rng.uniform(*SIR_RANGE_DB)),
+           "excerpt_start_s": float(rng.uniform(0.0, 49.0)),
+           "source": source}
+    if INDEP_SIDE:
+        # v8: 車のエンジン回転(f0)も±20%ジッタ（乱数は既存draw列の後に追加）
+        out["f0_engine"] = 42.0 * float(rng.uniform(0.8, 1.2))
+    return out
 
 
 def sample_noise(idx: int) -> dict:
@@ -166,14 +209,25 @@ def sample_noise(idx: int) -> dict:
 def sample_scene(idx: int) -> dict:
     """クリップ idx の条件を決定論的にサンプルする。"""
     rng = np.random.default_rng(GLOBAL_SEED * 1000 + idx)
-    # 側は交互割当で train/val とも完全均衡にする（他は乱数）
-    side = 1.0 if idx % 2 == 0 else -1.0
-    # v5/v6のみ4クラス均等割当（idx%4）。他は常にsiren（既存v1-v4の割当式は変更しない＝
+    # v5/v6/v7のみ4クラス均等割当（idx%4）。他は常にsiren（既存v1-v4の割当式は変更しない＝
     # 既に検証済みのv3/v4のシーンをbit単位で再現できるようにするため）
     if MULTICLASS:
         hazard_class = HAZARD_CLASSES[idx % 4]
-        siren_type = ("peepo" if (idx // 4) % 2 == 0 else "wail") if hazard_class == "siren" else "-"
+        if INDEP_SIDE:
+            # v8: 側とサイレン型をクラス(idx%4)と互いに独立化（レビュー#1対応。
+            # 全組合せの均衡はドライラン検算済み: クラス×側30/30・10/10・10/10、
+            # サイレン型×側15/15・5/5・5/5）
+            side = 1.0 if (idx // 4) % 2 == 0 else -1.0
+            siren_type = (("peepo" if (idx // 8) % 2 == 0 else "wail")
+                          if hazard_class == "siren" else "-")
+        else:
+            # v5-v7の式（凍結。side=idx%2との組でクラス×側が100%交絡していた欠陥あり、
+            # 再現性のためコードは残す。詳細=out/adversarial_review_2026-07-14.md #1）
+            side = 1.0 if idx % 2 == 0 else -1.0
+            siren_type = (("peepo" if (idx // 4) % 2 == 0 else "wail")
+                          if hazard_class == "siren" else "-")
     else:
+        side = 1.0 if idx % 2 == 0 else -1.0
         hazard_class = "siren"
         siren_type = "peepo" if (idx // 2) % 2 == 0 else "wail"
     offset = float(rng.uniform(*OFFSET_RANGE_M)) * side
@@ -197,9 +251,28 @@ def sample_scene(idx: int) -> dict:
         }
     else:
         siren_params = {}
-    return {
+    gain_db = float(rng.uniform(-6.0, 0.0))
+    # v8のみ: siren以外の3クラスにも周波数±5%・時間構造±10%のジッタ（レビューP5対応。
+    # v5-v7ではbeep/bellが全クリップ同一波形＝周波数照合のショートカットを許していた）。
+    # 乱数はgain_dbの後に引く＝既存版の乱数系列に影響しない
+    dry_params = {}
+    if INDEP_SIDE:
+        if hazard_class == "horn":
+            dry_params = {"f_lo": 410.0 * float(rng.uniform(0.95, 1.05)),
+                          "f_hi": 500.0 * float(rng.uniform(0.95, 1.05)),
+                          "honk_sec": 0.35 * float(rng.uniform(0.9, 1.1)),
+                          "gap_sec": 0.15 * float(rng.uniform(0.9, 1.1))}
+        elif hazard_class == "backup_beep":
+            dry_params = {"freq": 1000.0 * float(rng.uniform(0.95, 1.05)),
+                          "on_sec": 0.5 * float(rng.uniform(0.9, 1.1)),
+                          "off_sec": 0.5 * float(rng.uniform(0.9, 1.1))}
+        elif hazard_class == "bike_bell":
+            dry_params = {"f0": 3000.0 * float(rng.uniform(0.95, 1.05)),
+                          "ring_gap_sec": 0.45 * float(rng.uniform(0.9, 1.1)),
+                          "repeat_period_sec": 2.0 * float(rng.uniform(0.9, 1.1))}
+    out = {
         "idx": idx, "name": clip_name(idx),
-        "split": "train" if idx < N_TRAIN else "val",
+        "split": split_name(idx),
         "side": "L" if side > 0 else "R", "offset_m": offset,
         "speed_mps": speed, "dir_x": dirx, "t_cpa_s": t_cpa,
         "src_z_m": z, "x_start": x0, "x_end": x1,
@@ -207,8 +280,12 @@ def sample_scene(idx: int) -> dict:
         "class_idx": HAZARD_CLASS_IDX[hazard_class] if MULTICLASS else 4,
         "class_name": hazard_class if MULTICLASS else "Siren",
         "siren_type": siren_type, "siren_params": siren_params,
-        "gain_db": float(rng.uniform(-6.0, 0.0)),
+        "gain_db": gain_db,
     }
+    if INDEP_SIDE:
+        # キー自体をv8限定にする（v5-v7のscene.jsonのバイト再現性を保つため）
+        out["dry_params"] = dry_params
+    return out
 
 
 def build_scene_config(s: dict) -> SceneConfig:
@@ -240,11 +317,14 @@ def generate_clip(idx: int) -> None:
         dry = gen(scene.clip_len_sec, scene.fs_sim, **s["siren_params"])
     elif hazard_class == "horn":
         rng_dry = np.random.default_rng(GLOBAL_SEED * 610271 + idx)
-        dry = make_horn(scene.clip_len_sec, scene.fs_sim, rng_dry)
+        dry = make_horn(scene.clip_len_sec, scene.fs_sim, rng_dry,
+                        **s.get("dry_params", {}))
     elif hazard_class == "backup_beep":
-        dry = make_backup_beep(scene.clip_len_sec, scene.fs_sim)
+        dry = make_backup_beep(scene.clip_len_sec, scene.fs_sim,
+                               **s.get("dry_params", {}))
     elif hazard_class == "bike_bell":
-        dry = make_bike_bell(scene.clip_len_sec, scene.fs_sim)
+        dry = make_bike_bell(scene.clip_len_sec, scene.fs_sim,
+                             **s.get("dry_params", {}))
     else:
         raise ValueError(f"unknown hazard_class: {hazard_class}")
     if SPARSE_INTERF:
@@ -295,6 +375,9 @@ def generate_clip(idx: int) -> None:
     assert np.max(np.abs(foa_withrefl)) < INSPECT_PEAK_MAX, "clipping risk"
     sf.write(wdir / "foa_withrefl_24k.flac", foa_withrefl.T.astype(np.float32),
              scene.fs_out, subtype="PCM_24")
+    # v7: データセット音声の対象音は反射込み。ラベルは直接音DOAのまま
+    # （反射を「見抜いて」真の方向を答えるタスクにする）
+    foa_target = foa_withrefl if WITH_REFL else foa_direct
 
     foa_interf = None
     if WITH_NOISE:
@@ -303,10 +386,14 @@ def generate_clip(idx: int) -> None:
             a0 = int(s["event"]["t_on"] * scene.fs_out)
             a1 = int(s["event"]["t_off"] * scene.fs_out)
         else:
-            a0, a1 = 0, foa_direct.shape[1]
-        p_sig = float(np.mean(foa_direct[0, a0:a1] ** 2))
+            a0, a1 = 0, foa_target.shape[1]
+        # SNR/SIRの正規化基準: v8以降は全条件共通で「直接音W」に固定
+        # （反射や物理スイッチの状態に依らず同じ基準＝ablationを真の1要素差にする。
+        # レビュー#5/P3対応。v7以前は foa_target 基準のまま凍結）
+        foa_basis = foa_direct if SNR_BASIS_DIRECT else foa_target
+        p_sig = float(np.mean(foa_basis[0, a0:a1] ** 2))
 
-        mix = foa_direct.copy()
+        mix = foa_target.copy()
         if SPARSE_INTERF:
             # 妨害音: 車を別軌道で通過させ、独自の時変DOAでFOA化
             itf = sample_interferer(idx)
@@ -314,7 +401,8 @@ def generate_clip(idx: int) -> None:
                 # クリーン合成の走行音（実録音は使わない、engine.py参照）
                 rng_itf_audio = np.random.default_rng(GLOBAL_SEED * 727999 + idx)
                 car10 = make_car_driveby(scene.clip_len_sec, scene.fs_sim,
-                                         rng_itf_audio)
+                                         rng_itf_audio,
+                                         f0=itf.get("f0_engine", 42.0))
             else:
                 car, car_sr = sf.read(CAR_WAV)
                 assert car_sr == scene.fs_sim, "car source must be 48 kHz"
@@ -336,6 +424,21 @@ def generate_clip(idx: int) -> None:
             te_i, ps_i = solve_emission_times(tr_i, wp_i, mic, c)
             u_i, _ = doa_unit_vectors(ps_i, mic)
             foa_interf = encode_foa_timevarying(mono_i, u_i)
+            if WITH_REFL:
+                # v7: 妨害車にも地面反射を適用（対象音と同じ像音源モデル。
+                # 世界の物理は音源の種別によらず一貫させる）
+                wp_im = wp_i.copy()
+                wp_im[:, 3] = 2 * scene.ground_z - wp_im[:, 3]
+                mono_im = decimate_to_out_rate(
+                    render_mono(car10, wp_im, scene.mic_pos, scene.fs_sim,
+                                scene.clip_len_sec,
+                                temperature_c=scene.temperature_c,
+                                pressure_atm=scene.pressure_atm,
+                                rel_humidity=scene.rel_humidity),
+                    scene.fs_sim, scene.fs_out)
+                te_im, ps_im = solve_emission_times(tr_i, wp_im, mic, c)
+                u_im, _ = doa_unit_vectors(ps_im, mic)
+                foa_interf = foa_interf + encode_foa_timevarying(mono_im, u_im)
             p_int = float(np.mean(foa_interf[0, a0:a1] ** 2))
             g_i = float(np.sqrt(p_sig / (p_int * 10.0 ** (itf["sir_db"] / 10.0))))
             foa_interf = foa_interf * g_i
@@ -355,7 +458,7 @@ def generate_clip(idx: int) -> None:
         foa_out = mix + g_n * noise
         s["noise"] = noise_cond
     else:
-        foa_out = foa_direct
+        foa_out = foa_target
 
     # ヘッドルーム保護: 超えそうなら全成分を等倍で縮小（SNR/SIR比は不変）
     peak_out = float(np.max(np.abs(foa_out)))
@@ -365,7 +468,15 @@ def generate_clip(idx: int) -> None:
         foa_out = foa_out * post_scale
         s["post_scale"] = post_scale
     if WITH_NOISE:
+        # 「混合に入っている形の」クリーン対象音（v7は反射込み）。検品のSNR/SIR実測と
+        # step8のフレームエネルギー分析がこれを使う
         sf.write(wdir / "foa_clean_24k.flac",
+                 (foa_target * post_scale).T.astype(np.float32),
+                 scene.fs_out, subtype="PCM_24")
+    if WITH_REFL:
+        # 反射ON版では、ラベル整合ゲート（音とラベルのDOA照合）用に直接音のみの
+        # FOAも保存する（反射込みではIV仰角が物理的にラベルからズレるため）
+        sf.write(wdir / "foa_direct_24k.flac",
                  (foa_direct * post_scale).T.astype(np.float32),
                  scene.fs_out, subtype="PCM_24")
     if foa_interf is not None:
@@ -430,10 +541,17 @@ def inspect_all() -> int:
             return (float(np.median(az_err)), float(np.max(az_err)),
                     float(np.median(el_err)))
 
-        # 検品ゲートはクリーン版（音とラベルの整合は物理の性質。雑音は既知の付加）
+        # 検品ゲートはクリーン版（音とラベルの整合は物理の性質。雑音は既知の付加）。
+        # 反射ON版では foa_direct_24k（直接音のみ）でラベル整合を照合する
+        # —— 反射込みだとIV仰角が物理的にラベル（=直接音方向）からズレるため
         clean_path = WORK / name / "foa_clean_24k.flac"
-        if clean_path.exists():
-            foa_gate = np.asarray(sf.read(clean_path)[0], np.float64).T
+        foa_clean = (np.asarray(sf.read(clean_path)[0], np.float64).T
+                     if clean_path.exists() else None)
+        direct_path = WORK / name / "foa_direct_24k.flac"
+        if direct_path.exists():
+            foa_gate = np.asarray(sf.read(direct_path)[0], np.float64).T
+        elif foa_clean is not None:
+            foa_gate = foa_clean
         else:
             foa_gate = foa_ds
         peak = float(np.max(np.abs(foa_ds)))
@@ -443,6 +561,7 @@ def inspect_all() -> int:
         # 実SNR/SIRの独立測定（目標±0.5dB）と、混合後のIV劣化の記録
         snr_target, snr_meas, az_med_noisy = "", "", ""
         sir_target, sir_meas = "", ""
+        snr_active, sir_inband, sir_fullclip = "", "", ""
         snr_ok = True
         if clean_path.exists():
             snr_target = round(s.get("noise", {}).get("snr_db", float("nan")), 2)
@@ -450,25 +569,66 @@ def inspect_all() -> int:
             itf_path = WORK / name / "foa_interf_24k.flac"
             if itf_path.exists():
                 foa_i = np.asarray(sf.read(itf_path)[0], np.float64).T
-                residual = foa_ds - foa_gate - foa_i   # ≒ 背景雑音成分のみ
+                residual = foa_ds - foa_clean - foa_i   # ≒ 背景雑音成分のみ
                 ev = s.get("event", {})
                 a0 = int(ev.get("t_on", 0.0) * fs)
                 a1 = int(ev.get("t_off", 10.0) * fs)
-                p_sig = float(np.mean(foa_gate[0, a0:a1] ** 2))
+                # SNR/SIRの照合基準は生成時と同じ（v8=直接音W、v7以前=混合対象音W）
+                foa_basis = (foa_gate if (SNR_BASIS_DIRECT
+                                          and direct_path.exists())
+                             else foa_clean)
+                p_sig = float(np.mean(foa_basis[0, a0:a1] ** 2))
                 p_int = float(np.mean(foa_i[0, a0:a1] ** 2))
                 sir_target = round(
                     s.get("interferer", {}).get("sir_db", float("nan")), 2)
                 sir_meas = round(10.0 * np.log10(p_sig / p_int), 2)
-                snr_meas = round(10.0 * np.log10(
-                    p_sig / float(np.mean(residual[0] ** 2))), 2)
+                p_noise = float(np.mean(residual[0] ** 2))
+                snr_meas = round(10.0 * np.log10(p_sig / p_noise), 2)
                 snr_ok = (abs(snr_meas - snr_target) < 0.5
                           and abs(sir_meas - sir_target) < 0.5)
+                # --- 記録列（レビュー#10/P4/P11対応、ゲートには使わない） ---
+                # 発音瞬間基準の実効SNR（窓内0.1sフレームのうちエネルギー中央値以上）
+                spf = int(0.1 * fs)
+                fr = [float(np.mean(foa_clean[0, k:k + spf] ** 2))
+                      for k in range(a0, max(a0 + spf, a1 - spf + 1), spf)]
+                fr = np.array(fr)
+                hi_frames = fr[fr >= np.median(fr)]
+                snr_active = round(10.0 * np.log10(
+                    float(np.mean(hi_frames)) / p_noise), 2)
+                # ターゲット帯域内SIR（クラス帯域のFFTパワー比）
+                blo, bhi = BAND_BY_CLASS.get(s.get("hazard_class", "siren"),
+                                             (200.0, 4000.0))
+                def band_p(x):
+                    X = np.abs(np.fft.rfft(x[a0:a1])) ** 2
+                    f = np.fft.rfftfreq(a1 - a0, 1.0 / fs)
+                    m = (f >= blo) & (f < bhi)
+                    return float(np.mean(X[m]) + 1e-30)
+                sir_inband = round(10.0 * np.log10(
+                    band_p(foa_basis[0]) / band_p(foa_i[0])), 2)
+                # クリップ全長の妨害レベル基準SIR（窓外の車支配の監視用）
+                sir_fullclip = round(10.0 * np.log10(
+                    p_sig / float(np.mean(foa_i[0] ** 2))), 2)
             else:
-                snr_meas = round(measure_snr_db(foa_gate, foa_ds), 2)
+                snr_meas = round(measure_snr_db(foa_clean, foa_ds), 2)
                 snr_ok = abs(snr_meas - snr_target) < 0.5
 
+        # 反射込み音声のIV仰角バイアスのレンジゲート（レビューP8対応）:
+        # 物理予測は「全数負・−8〜0°」。範囲外なら鏡像エンコードのバグを疑う
+        el_bias_med = ""
+        refl_ok = True
+        if WITH_REFL and foa_clean is not None and direct_path.exists():
+            _, _, el_iv_c, en_c = intensity_vector_doa(
+                foa_clean, fs, frame_sec=0.1, fmin=200, fmax=4000)
+            el_iv_c[en_c < np.max(en_c) * 1e-6] = np.nan
+            diffs = [el_iv_c[k] - evs[0][2] for k, evs in labels.items()
+                     if k < len(el_iv_c) and np.isfinite(el_iv_c[k])]
+            if diffs:
+                el_bias_med = round(float(np.median(diffs)), 2)
+                refl_ok = -8.0 <= el_bias_med <= 0.0
+
         ok = (az_med < INSPECT_AZ_MEDIAN_DEG and el_med < INSPECT_EL_MEDIAN_DEG
-              and peak < INSPECT_PEAK_MAX and rms_w > INSPECT_RMS_MIN and snr_ok)
+              and peak < INSPECT_PEAK_MAX and rms_w > INSPECT_RMS_MIN
+              and snr_ok and refl_ok)
         n_fail += 0 if ok else 1
         rows_out.append({
             "name": name, "split": s.get("split", "?"),
@@ -487,6 +647,8 @@ def inspect_all() -> int:
             "t_on": s.get("event", {}).get("t_on", ""),
             "t_off": s.get("event", {}).get("t_off", ""),
             "az_med_err_noisy": az_med_noisy,
+            "snr_active_med_db": snr_active, "sir_inband_db": sir_inband,
+            "sir_fullclip_db": sir_fullclip, "el_bias_med": el_bias_med,
             "n_frames": len(labels), "result": "PASS" if ok else "FAIL",
         })
         snr_note = f" snr={snr_meas}dB az_noisy={az_med_noisy}" if snr_meas != "" else ""
@@ -588,7 +750,7 @@ def pack() -> None:
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "plan"
     if mode == "plan":
-        for i in range(N_TRAIN + N_VAL):
+        for i in range(N_TRAIN + N_VAL + N_TEST):
             s = sample_scene(i)
             label = s["hazard_class"] if s["hazard_class"] != "siren" else s["siren_type"]
             print(f"{i:02d} {s['name']} {s['split']:5s} {s['side']} "
@@ -609,4 +771,4 @@ if __name__ == "__main__":
         pack()
     else:
         print("usage: plan | gen A-B | preview A-B | inspect | pack"
-              "  [--v1|--v2|--v4|--v5|--v6] (default: v3)")
+              "  [--v1|--v2|--v4|--v5|--v6|--v7|--v8] (default: v3)")
