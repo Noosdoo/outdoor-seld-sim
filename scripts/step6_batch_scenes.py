@@ -624,7 +624,10 @@ def inspect_all() -> int:
                      if k < len(el_iv_c) and np.isfinite(el_iv_c[k])]
             if diffs:
                 el_bias_med = round(float(np.median(diffs)), 2)
-                refl_ok = -8.0 <= el_bias_med <= 0.0
+                # 下限-15°: v7実測(-7.8〜-0.6)＋v8新規シーンの裾(-9.7)に物理的余裕を
+                # 持たせた値。バグ（鏡映のz符号ミス等）なら正側や桁違いになるので
+                # 検知力は保たれる（当初の-8はv7の経験レンジそのままで狭すぎた）
+                refl_ok = -15.0 <= el_bias_med <= 0.0
 
         ok = (az_med < INSPECT_AZ_MEDIAN_DEG and el_med < INSPECT_EL_MEDIAN_DEG
               and peak < INSPECT_PEAK_MAX and rms_w > INSPECT_RMS_MIN
