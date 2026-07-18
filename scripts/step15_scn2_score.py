@@ -155,7 +155,7 @@ def main():
         rep.append(f"- {t}: 通知 {fired[t]}/{n[t]}、リードタイム中央値 "
                    f"{np.median(L):.1f}s / >=2.5s {(L >= 2.5).mean():.0%}"
                    if len(L) else f"- {t}: 通知 {fired[t]}/{n[t]}")
-    rep.append(f"- ベル通知方向と車真方向の差 中央値 {np.median(codir):.1f}°"
+    rep.append(f"- バック音（beep）の通知方向と車真方向の差 中央値 {np.median(codir):.1f}°"
                "（=警告音が車の方向を正しく代弁）")
     rep.append("")
 

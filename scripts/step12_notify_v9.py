@@ -57,6 +57,10 @@ CAR_WIN = 10              # 1.0s 窓
 CAR_MIN_HITS = 9          # 窓内 9/10 フレーム以上
 CAR_AZ_DRIFT_MAX = 15.0   # [deg] CBDR: 方位変化小
 REFRACTORY = 50           # 5s
+DIR_REFRACT_DEG = 45.0    # v2(2026-07-18): 不応期は「クラス×方向」単位。前回発火と方位が
+                          # これ以上離れていれば別イベントとして再発火を許す（監査H5-4:
+                          # 同一クラス2イベント=siren×2等の2本目が構造的に通知不能だった修正。
+                          # 単一音源クリップでは5s内の方位移動<45°のため従来結果と同一）
 LEAD_PASS, LEAD_MIN = 2.5, 2.0
 
 
@@ -80,13 +84,17 @@ def circ_drift(az_list):
 def fire_events(pred_clip, mix_level):
     """1クリップの予測から通知発火列 [(frame, class, az)] を返す（ルールv1）。"""
     fires = []
-    last_fire = {}
+    last_fires = defaultdict(list)   # class -> [(frame, az)] 方向別不応期用
     # フレームごとのクラス→(az,el)辞書に整形
     byframe = {k: {c: (a, e) for c, a, e in evs} for k, evs in pred_clip.items()}
+
+    def blocked(c, k, az):
+        return any(k - kp < REFRACTORY
+                   and abs((az - ap + 180) % 360 - 180) <= DIR_REFRACT_DEG
+                   for kp, ap in last_fires[c])
+
     for k in range(100):
         for c in range(6):
-            if c in last_fire and k - last_fire[c] < REFRACTORY:
-                continue
             if c == CAR:
                 ks = list(range(k - CAR_WIN + 1, k + 1))
                 if ks[0] < 0:
@@ -101,15 +109,20 @@ def fire_events(pred_clip, mix_level):
                 slope = np.polyfit(np.arange(len(lv)), lv, 1)[0]
                 if slope <= 0.0:
                     continue
+                if blocked(c, k, azs[-1]):
+                    continue
                 fires.append((k, c, azs[-1]))
-                last_fire[c] = k
+                last_fires[c].append((k, azs[-1]))
             else:
                 ks = list(range(k - WARN_CONFIRM + 1, k + 1))
                 if ks[0] < 0:
                     continue
                 if all(c in byframe.get(kk, {}) for kk in ks):
-                    fires.append((k, c, byframe[k][c][0]))
-                    last_fire[c] = k
+                    az = byframe[k][c][0]
+                    if blocked(c, k, az):
+                        continue
+                    fires.append((k, c, az))
+                    last_fires[c].append((k, az))
     return fires
 
 

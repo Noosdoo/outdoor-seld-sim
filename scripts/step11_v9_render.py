@@ -59,8 +59,14 @@ from outdoor_seld.siren import make_peepo_siren, make_siren  # noqa: E402
 #   （最高870Hz・周期4s/8s抽選・下限435Hz仮置き） ③自転車ベル→単打:引き打ち=50:50。
 #   割当表・シード・他クラス・較正・検品はv9と完全同一。修正3クラスを含まない
 #   クリップはv9とビット一致する。v9は凍結保存（比較材料）
-V91 = "--v91" in sys.argv
-DS_NAME = "outdoor_siren_v9_1" if V91 else "outdoor_siren_v9"
+# --v92 = v9.2追加分（学習追加180+対照180+幻覚評価30）を独立フォルダに生成する経路
+#   （監査H5-3: v9.1フォルダへの追記は版管理違反 → out/dataset_outdoor_siren_v9_2_add/）。
+#   音源はv9.1仕様（--v92は--v91を含意）。Colab側でのみ datasets/outdoor_siren_v9_1/ に
+#   マージ展開する。設計= out/v9_2_design_2026-07-18.md（6節の改訂込み）
+V92 = "--v92" in sys.argv
+V91 = ("--v91" in sys.argv) or V92
+DS_NAME = ("outdoor_siren_v9_2_add" if V92
+           else ("outdoor_siren_v9_1" if V91 else "outdoor_siren_v9"))
 DS = ROOT / "out" / f"dataset_{DS_NAME}"
 # 割当表の正はv9のplan（v9.1も同一の表を使う。来歴用にv9.1側へもコピーされる）
 PLAN = ROOT / "out" / "dataset_outdoor_siren_v9" / "plan"
@@ -412,6 +418,35 @@ def sample_scene_v9(row: dict) -> dict:
         return sample_scenario2(row, rng)
     if row["scenario"].startswith("traffic"):
         return sample_v10a(row, rng)
+    if row["scenario"] == "carfree_siren":
+        # 幻覚評価: 車なし×連続サイレン（room9より広い幾何: 横3-15m・通常暗騒音）
+        if row["motion"] == "walk":
+            v = float(rng.uniform(*WALK_SPEED))
+            mic = np.array([[0.0, -v * 5.0, 0.0, MIC_STATIC[2]],
+                            [CLIP, v * 5.0, 0.0, MIC_STATIC[2]]])
+            mic_rec = {"motion": "walk", "walk_speed_mps": v, "walk_dir_x": 1.0,
+                       "waypoints": mic.tolist()}
+        else:
+            mic, mic_rec = np.array(MIC_STATIC), {"motion": "static"}
+        s = {"row": dict(row), "mic": mic_rec, "sources": [], "_mic_arr": mic}
+        side = 1.0 if row["w1_side"] == "L" else -1.0
+        lv, l1m = _draw_level("siren", rng)
+        params = _warn_params("siren", rng, row["seed"])
+        vs = float(rng.uniform(*SPEED["siren"]))
+        dirx = 1.0 if rng.random() < 0.5 else -1.0
+        y = float(rng.uniform(*WARN_OFFSET)) * side
+        z = float(rng.uniform(*SRC_Z))
+        t_cpa = float(rng.uniform(*CAR_TCPA))
+        x0 = float(_mic_pos_at(mic, t_cpa)[0]) - dirx * vs * t_cpa
+        s["sources"].append({"class": "siren", "kind": "vehicle",
+                             "wp": [[0.0, x0, y, z],
+                                    [CLIP, x0 + dirx * vs * CLIP, y, z]],
+                             "t_on": 0.0, "t_off": CLIP, "speed_mps": vs,
+                             "dir_x": dirx, "t_cpa_rel_s": t_cpa,
+                             "law_db": lv, "l1m_db": l1m, "params": params})
+        s["noise"] = {"dba": float(rng.uniform(*NOISE_DBA)),
+                      "seed": row["seed"] * 7919 + 13}
+        return s
     is_probe = row["scenario"].startswith("probe_")
 
     # ① マイク（歩行はx軸沿い直線・t=5sに原点。交差点サイレンだけ横断=y軸沿い）
@@ -464,11 +499,12 @@ def sample_scene_v9(row: dict) -> dict:
             "law_db": lv, "l1m_db": l1m,
             "params": {"f0": f0, "audio_seed": row["seed"] * 7 + 5}})
 
-    # ③④ 警告音
+    # ③④ 警告音（v9.2: w1==w2の同一クラス2本はw2をtrack=1にする）
     for key in ("w1", "w2"):
         cls = row[f"{key}_class"]
         if not cls:
             continue
+        track = 1 if (key == "w2" and cls == row["w1_class"]) else 0
         side = 1.0 if row[f"{key}_side"] == "L" else -1.0
         lv, l1m = _draw_level(cls, rng)
         params = _warn_params(cls, rng, row["seed"])
@@ -508,6 +544,7 @@ def sample_scene_v9(row: dict) -> dict:
                    "t_on": round(t_on, 3), "t_off": round(t_on + dur, 3),
                    "speed_mps": v, "dir_x": dirx, "t_cpa_s": t_cpa,
                    "law_db": lv, "l1m_db": l1m, "params": params}
+        src["track"] = track
         s["sources"].append(src)
 
     # ⑤ 暗騒音（プローブは固定レベル）
@@ -928,6 +965,18 @@ def pack_v10a() -> None:
     print(f"wrote {zip_path} ({zip_path.stat().st_size / 1e6:.1f} MB, {n} files)")
 
 
+def pack_v92() -> None:
+    """v9.2追加分のzip。展開先はColabの datasets/outdoor_siren_v9_1/（マージ）。"""
+    zip_path = ROOT / "out" / "dataset_outdoor_siren_v9_2_add.zip"
+    n = 0
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
+        for sub in ("foa", "metadata", "masks"):
+            for p in sorted((DS / sub).glob("*")):
+                zf.write(p, f"datasets/outdoor_siren_v9_1/{sub}/{p.name}")
+                n += 1
+    print(f"wrote {zip_path} ({zip_path.stat().st_size / 1e6:.1f} MB, {n} files)")
+
+
 def pack_scn2() -> None:
     """追加シナリオ（room4〜8）だけの追補zip。既存のdatasets/へ追記展開する。
 
@@ -972,6 +1021,8 @@ if __name__ == "__main__":
         pack_scn2()
     elif mode == "pack_v10a":
         pack_v10a()
+    elif mode == "pack_v92":
+        pack_v92()
     else:
         print("usage: precheck | gen A-B [--set core|scenario|probe|scenario2] "
               "| inspect | pack | pack_scn2")

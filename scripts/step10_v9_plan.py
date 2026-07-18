@@ -249,6 +249,79 @@ def build_v10a() -> list:
     return rows
 
 
+def build_v92() -> tuple:
+    """v9.2（改訂版設計= out/v9_2_design_2026-07-18.md 2節+6節）の割当表3種。
+
+    v92add(180, fold1_room2)=学習追加: A複数車100(2台60/3台40)+B車なし50(siren入り20)+
+    C同一クラス警告×2 30(siren/beep/bell各10)。
+    v92ctrl(180, fold1_room3)=対照: v9.1分布の通常クリップ（データ増量効果の分離用）。
+    halluc(30, fold2_room3)=評価専用: 車なし×連続サイレン（幻覚検定n=50化）。
+    """
+    base = GLOBAL_SEED * 613 + 50000
+    add, k = [], 0
+
+    def row(clip_id, motion, n_warn, w1, s1, w2, s2, tier, car, scen):
+        nonlocal k
+        r = {"clip_id": clip_id, "split": clip_id.split("_")[0],
+             "motion": motion, "n_warnings": n_warn,
+             "w1_class": w1, "w1_side": s1, "w2_class": w2, "w2_side": s2,
+             "danger_tier": tier, "car_side": car, "scenario": scen,
+             "seed": base + k}
+        k += 1
+        return r
+
+    # A: 複数車100（v10aと同じtraffic経路。警告0/1を交互）
+    warn_k = 0
+    for i in range(100):
+        ncars = 2 if i < 60 else 3
+        w = WARN_CLASSES[warn_k % 5] if i % 2 == 0 else ""
+        if w:
+            warn_k += 1
+        add.append(row(f"fold1_room2_mix{i+1:03d}",
+                       "static" if (i // 2) % 2 == 0 else "walk",
+                       1 if w else 0, w, SIDES[i % 2] if w else "", "", "",
+                       TIERS[i % 3], SIDES[(i // 3) % 2], f"traffic{ncars}"))
+    # B: 車なし50（通常経路のcar_side=''。sirenを20本保証、残りは他4クラス循環）
+    for i in range(50):
+        w1 = "siren" if i < 20 else WARN_CLASSES[1 + (i - 20) % 4]
+        two = i % 5 == 4
+        w2 = WARN_CLASSES[(i + 2) % 5] if two else ""
+        if w2 == w1:
+            w2 = WARN_CLASSES[(i + 3) % 5]
+        add.append(row(f"fold1_room2_mix{100+i+1:03d}",
+                       "static" if i % 2 == 0 else "walk",
+                       2 if w2 else 1, w1, SIDES[i % 2],
+                       w2, SIDES[(i + 1) % 2] if w2 else "", "na", "", "normal"))
+    # C: 同一クラス警告×2 30（siren/beep/bell各10。車1台同乗）
+    for i, cls in enumerate(["siren"] * 10 + ["backup_beep"] * 10 + ["bike_bell"] * 10):
+        add.append(row(f"fold1_room2_mix{150+i+1:03d}",
+                       "static" if i % 2 == 0 else "walk", 2,
+                       cls, SIDES[i % 2], cls, SIDES[(i + 1) % 2],
+                       TIERS[i % 3], SIDES[(i // 2) % 2], "normal"))
+
+    # 対照180（v9.1分布の通常クリップ: 車1台・警告0/1/2=30/55/15%相当）
+    ctrl = []
+    n_w = [0] * 54 + [1] * 99 + [2] * 27
+    for i in range(180):
+        nw = n_w[i]
+        w1 = WARN_CLASSES[i % 5] if nw >= 1 else ""
+        w2 = WARN_CLASSES[(i + 2) % 5] if nw == 2 else ""
+        if w2 and w2 == w1:
+            w2 = WARN_CLASSES[(i + 3) % 5]
+        ctrl.append(row(f"fold1_room3_mix{i+1:03d}",
+                        "static" if i % 2 == 0 else "walk", nw,
+                        w1, SIDES[i % 2] if w1 else "",
+                        w2, SIDES[(i + 1) % 2] if w2 else "",
+                        TIERS[i % 3], SIDES[(i // 3) % 2], "normal"))
+
+    # 幻覚評価30（車なし×連続サイレン）
+    hal = [row(f"fold2_room3_mix{i+1:03d}",
+               "static" if i % 2 == 0 else "walk", 1,
+               "siren", SIDES[i % 2], "", "", "na", "", "carfree_siren")
+           for i in range(30)]
+    return add, ctrl, hal
+
+
 def build_probe() -> list:
     """レベル正規化プローブ: 6クラス×8本（静止4/歩行4）、単一音源を同一受聴レベルで提示。
 
@@ -376,16 +449,24 @@ def main() -> int:
     core1, scen, probe = build_core(), build_scenario(), build_probe()
     scen2 = build_scenario2()
     v10a = build_v10a()
+    v92add, v92ctrl, halluc = build_v92()
     core2 = build_core()  # 決定論チェック: 2回構築して一致
     csv1, csv2 = to_csv(core1), to_csv(core2)
     assert hashlib.md5(csv1.encode()).hexdigest() == hashlib.md5(csv2.encode()).hexdigest(), \
         "determinism check failed"
 
     rep = check_core(core1)
-    seeds = [r["seed"] for r in core1 + scen + probe + scen2 + v10a]
+    allrows = core1 + scen + probe + scen2 + v10a + v92add + v92ctrl + halluc
+    seeds = [r["seed"] for r in allrows]
     assert len(set(seeds)) == len(seeds), "seed collision"
-    ids = [r["clip_id"] for r in core1 + scen + probe + scen2 + v10a]
+    ids = [r["clip_id"] for r in allrows]
     assert len(set(ids)) == len(ids), "clip_id collision"
+    # v92の検算: 構成数とsiren保証
+    assert len(v92add) == 180 and len(v92ctrl) == 180 and len(halluc) == 30
+    assert sum(1 for r in v92add if r["scenario"].startswith("traffic")) == 100
+    assert sum(1 for r in v92add if not r["car_side"] and r["scenario"] == "normal") == 50
+    assert sum(1 for r in v92add if r["w1_class"] == r["w2_class"] != "") == 30
+    assert sum(1 for r in v92add[100:150] if r["w1_class"] == "siren") >= 20
 
     PLAN_DIR.mkdir(parents=True, exist_ok=True)
     (PLAN_DIR / "assignment_core.csv").write_text(csv1, encoding="utf-8")
@@ -393,6 +474,9 @@ def main() -> int:
     (PLAN_DIR / "assignment_probe.csv").write_text(to_csv(probe), encoding="utf-8")
     (PLAN_DIR / "assignment_scenario2.csv").write_text(to_csv(scen2), encoding="utf-8")
     (PLAN_DIR / "assignment_v10a.csv").write_text(to_csv(v10a), encoding="utf-8")
+    (PLAN_DIR / "assignment_v92add.csv").write_text(to_csv(v92add), encoding="utf-8")
+    (PLAN_DIR / "assignment_v92ctrl.csv").write_text(to_csv(v92ctrl), encoding="utf-8")
+    (PLAN_DIR / "assignment_halluc.csv").write_text(to_csv(halluc), encoding="utf-8")
 
     md5 = hashlib.md5(csv1.encode()).hexdigest()
     lines = ["# v9 割当表 検算レポート（step10_v9_plan.py 自動生成）", "",
