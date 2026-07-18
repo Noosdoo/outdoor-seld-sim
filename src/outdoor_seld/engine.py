@@ -60,3 +60,49 @@ def make_car_driveby(duration_sec: float, fs: int, rng: np.random.Generator,
     x = (1.0 - rumble_mix) * tonal + rumble_mix * rumble
     peak_val = np.max(np.abs(x))
     return peak * x / peak_val if peak_val > 0 else x
+
+
+def make_tire_noise(duration_sec: float, fs: int, rng: np.random.Generator,
+                    f_lo: float = 600.0, f_hi: float = 2000.0) -> np.ndarray:
+    """タイヤ/路面ノイズ（v9新規）: 1kHz中心600-2000Hzの帯域雑音（RMS=1）。
+
+    根拠（out/v9_values_research_2026-07-16.md）: タイヤノイズは約1kHzが支配的で、
+    スペクトル形状は速度にほぼ不変（レベルだけ変わる）。帯域端は半オクターブの
+    コサインテーパで滑らかに落とす（矩形帯域のリンギング回避）。
+    """
+    n = int(round(duration_sec * fs))
+    white = rng.standard_normal(n)
+    X = np.fft.rfft(white)
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    shape = np.zeros_like(f)
+    inside = (f >= f_lo) & (f <= f_hi)
+    shape[inside] = 1.0
+    for edge, sign in ((f_lo, -1), (f_hi, +1)):   # 帯域外へ半オクターブで減衰
+        lo, hi = (edge / np.sqrt(2.0), edge) if sign < 0 else (edge, edge * np.sqrt(2.0))
+        m = (f >= lo) & (f < hi)
+        frac = (np.log2(np.maximum(f[m], 1e-9)) - np.log2(lo)) / (np.log2(hi) - np.log2(lo))
+        shape[m] = 0.5 - 0.5 * np.cos(np.pi * (frac if sign < 0 else 1.0 - frac))
+    x = np.fft.irfft(X * shape, n=n)
+    return x / np.std(x)
+
+
+def make_car_v9(duration_sec: float, fs: int, rng: np.random.Generator,
+                f0: float = 42.0, tire_frac_a: float = 0.7,
+                peak: float = 0.9) -> np.ndarray:
+    """v9の車走行音 = エンジン(make_car_driveby) + タイヤ帯(make_tire_noise)。
+
+    tire_frac_a: A特性パワーに占めるタイヤ成分の比率（既定0.7）。走行速度域では
+    タイヤ音が支配的という知見に合わせ、かつA特性でほぼ消える低域エンジン音も
+    質感として残す。配合はA特性RMSで合わせる（可聴性の議論と同じ土俵）。
+    絶対レベルは呼び出し側が calibration.gain_for_spl_a で較正する。
+    """
+    from .calibration import a_weighted_rms
+    eng = make_car_driveby(duration_sec, fs, rng, f0=f0, peak=1.0)
+    tire = make_tire_noise(duration_sec, fs, rng)
+    ra_e, ra_t = a_weighted_rms(eng, fs), a_weighted_rms(tire, fs)
+    # 合成後のA特性パワー比が tire_frac_a : (1-tire_frac_a) になるゲイン
+    g_t = np.sqrt(tire_frac_a) / ra_t
+    g_e = np.sqrt(1.0 - tire_frac_a) / ra_e
+    x = g_e * eng + g_t * tire
+    peak_val = np.max(np.abs(x))
+    return peak * x / peak_val if peak_val > 0 else x

@@ -23,7 +23,8 @@ from scipy.signal import fftconvolve, firwin2
 from dynamic_sound.acoustics.standards.ISO_9613_1_1993 import (
     attenuation_coefficients)
 
-from .geometry import solve_emission_times, sound_speed
+from .geometry import (receiver_positions_at, solve_emission_times,
+                       sound_speed)
 
 FIR_LEN = 513  # DynamicSound と同一（大気吸収フィルタのタップ数）
 
@@ -66,7 +67,12 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
 
     # ① 放射時刻と放射位置（全サンプル分を一括で解く。DynamicSoundは1サンプルずつ解く）
     te, ps_te = solve_emission_times(tr, np.asarray(waypoints), mic, c)
-    d = ps_te - mic[None, :]
+    if mic.ndim == 2:
+        # 歩行マイク（mic_pos が (M,4) 軌道、2026-07-16拡張）: 距離は
+        # 「受信時刻のマイク位置」から「放射時刻の音源位置」まで
+        d = ps_te - receiver_positions_at(tr, mic)
+    else:
+        d = ps_te - mic[None, :]
     dist = np.sqrt(np.sum(d * d, axis=1))   # マイクから放射位置までの距離
 
     # ② ドライ読み出し（線形補間、loop=False 相当）
@@ -74,13 +80,25 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
     if enable_doppler:
         pos = te * fs                        # 放射時刻をドライ音源のサンプル位置に変換
     else:
-        # ドップラーoff: 全サンプル共通の一定遅延で読む（ピッチ変調が消える）。
-        # 遅延は伝搬遅延 tr-te の中央値（決定論・シーン依存）。距離由来の
-        # 振幅・吸収は下の③④で従来どおり時変のまま適用される
-        delay = tr - te
-        t0 = float(np.median(delay[np.isfinite(delay)])) if np.any(
-            np.isfinite(delay)) else 0.0
-        pos = (tr - t0) * fs
+        # ドップラーoff（2026-07-18 改訂・P1規約の実装）:
+        # 「音源起因の時間伸縮だけを消し、観測者（歩行マイク）移動分は保持」
+        # （設計= out/v9_design_v2_2026-07-16.md 8節の事前決定）。
+        # 読み出し遅延 = ||mic(tr) − ps_ref|| / c。ps_ref は中央放射時刻での
+        # 音源位置（固定点）なので、音源の移動はピッチに影響しなくなる。
+        # マイクが動けば遅延は時変のまま＝観測者ドップラーは物理どおり残る。
+        # 静止マイクでは一定遅延（旧実装の中央値遅延と同種）に退化する。
+        # 振幅1/r・吸収は下の③④で従来どおり実距離の時変のまま
+        finite = np.isfinite(te)
+        if np.any(finite):
+            te_ref = float(np.median(te[finite]))
+            i_ref = int(np.argmin(np.abs(np.where(finite, te, np.inf) - te_ref)))
+            ps_ref = ps_te[i_ref]
+            mic_at = (receiver_positions_at(tr, mic) if mic.ndim == 2
+                      else np.broadcast_to(mic, (n, 3)))
+            delay_ref = np.linalg.norm(mic_at - ps_ref[None, :], axis=1) / c
+            pos = (tr - delay_ref) * fs
+        else:
+            pos = np.full(n, np.nan)
     valid = np.isfinite(pos) & (pos >= 0.0) & (pos < len(dry) - 1)  # 範囲内かつ解がある行だけ
     if not enable_doppler:
         # 未到達区間（te=NaN=音がまだ物理的に届いていない）はドップラーoffでも無音にする。

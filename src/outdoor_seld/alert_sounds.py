@@ -123,3 +123,137 @@ def make_bike_bell(duration_sec: float, fs: int, f0: float = 3000.0,
             x[i0:] += tone
     peak_val = np.max(np.abs(x))
     return peak * x / peak_val if peak_val > 0 else x
+
+
+def make_crossing(duration_sec: float, fs: int,
+                  f_a: float = 700.0, f_b: float = 750.0,
+                  rate_per_min: float = 130.0, h2_db: float = -15.0,
+                  fade_sec: float = 0.01, peak: float = 0.9) -> np.ndarray:
+    """踏切警報音（v9新規、設計= out/v9_design_v2_2026-07-16.md 3節）。
+
+    規格準拠（out/v9_values_research_2026-07-16.md）: 700/750Hz±15Hzの2音交互、
+    毎分130±5回（=1音の長さ 60/rate 秒）、電子音らしさとして第2倍音を h2_db で足す。
+    列車接近中は鳴りやまない現実に合わせ、クリップ全長で鳴る（発音窓なし）。
+    """
+    n = int(round(duration_sec * fs))
+    tone_len = 60.0 / rate_per_min          # 1音の長さ[s]（この後で交互に切り替わる）
+    spt = int(round(tone_len * fs))
+    x = np.zeros(n)
+    fade = int(fade_sec * fs)
+    env = np.ones(spt)
+    env[:fade] = np.linspace(0.0, 1.0, fade)
+    env[-fade:] = np.linspace(1.0, 0.0, fade)
+    k = 0
+    for i0 in range(0, n, spt):
+        f = f_a if k % 2 == 0 else f_b
+        m = min(spt, n - i0)
+        tt = np.arange(m) / fs
+        tone = np.sin(2.0 * np.pi * f * tt) \
+            + 10.0 ** (h2_db / 20.0) * np.sin(2.0 * np.pi * 2.0 * f * tt)
+        x[i0:i0 + m] = tone * env[:m]
+        k += 1
+    peak_val = np.max(np.abs(x))
+    return peak * x / peak_val if peak_val > 0 else x
+
+
+def make_crossing_v2(duration_sec: float, fs: int,
+                     f_a: float = 700.0, f_b: float = 750.0,
+                     rate_per_min: float = 130.0,
+                     h2_db: float = -14.0, h3_db: float = -22.0,
+                     detune: float = 1.004, detune_db: float = -6.0,
+                     decay_tau_sec: float = 0.30,
+                     strike_noise_db: float = -20.0,
+                     strike_noise_sec: float = 0.008,
+                     peak: float = 0.9,
+                     rng: np.random.Generator | None = None) -> np.ndarray:
+    """踏切警報音 改訂版（2026-07-17。make_crossing=v9凍結版は不変更）。
+
+    実物の構造（鉄道総研 人間科学ニュース200号・Wikipedia踏切警報機、
+    生録音との試聴比較で改訂）:
+      - 700Hz±15と750Hz±15は【同時に鳴る和音】（半音違いの濁った不協和音）
+      - 【毎分130±5回】は打撃（カン）の繰り返し。電鐘（金属打音）由来なので
+        各打は鐘のように励起→指数減衰し、**余韻は次の打まで残る**（ゲートで
+        切らない。初版v2のオン/オフゲートは切り際が不自然だった）
+      - 打撃瞬間の金属アタック（短い広帯域ノイズ）と、ベル系のデチューン
+        （わずかにずれた対でうなる）を付けて電鐘らしさを出す
+    """
+    n = int(round(duration_sec * fs))
+    x = np.zeros(n)
+    period = 60.0 / rate_per_min
+    if rng is None:
+        rng = np.random.default_rng(0)
+
+    def chord(tt):
+        y = np.zeros(len(tt))
+        for f in (f_a, f_b):
+            y += np.sin(2 * np.pi * f * tt)
+            y += 10 ** (detune_db / 20) * np.sin(2 * np.pi * f * detune * tt)
+            y += 10 ** (h2_db / 20) * np.sin(2 * np.pi * 2 * f * tt)
+            y += 10 ** (h3_db / 20) * np.sin(2 * np.pi * 3 * f * tt)
+        return y
+
+    ts = 0.0
+    while ts < duration_sec:
+        i0 = int(ts * fs)
+        m = n - i0
+        if m <= 0:
+            break
+        tt = np.arange(m) / fs
+        env = np.exp(-tt / decay_tau_sec)
+        na = min(int(0.003 * fs), len(env))   # 終端間際の打撃はランプも切り詰める
+        env[:na] *= np.linspace(0.0, 1.0, int(0.003 * fs))[:na]
+        strike = chord(tt) * env
+        # 打撃アタック: ごく短い金属質ノイズ（1〜4kHz帯）
+        ns = int(strike_noise_sec * fs)
+        click = rng.standard_normal(ns)
+        spec = np.fft.rfft(click)
+        fgrid = np.fft.rfftfreq(ns, 1.0 / fs)
+        spec[(fgrid < 1000) | (fgrid > 4000)] = 0.0
+        click = np.fft.irfft(spec, n=ns)
+        click = click / (np.max(np.abs(click)) + 1e-12)
+        # クリップ終端間際の打撃はアタックノイズが残り長を超えることがある（切り詰める）
+        ne = min(ns, len(strike))
+        strike[:ne] += (10 ** (strike_noise_db / 20)
+                        * click[:ne] * np.linspace(1, 0, ns)[:ne])
+        x[i0:] += strike
+        ts += period
+    peak_val = np.max(np.abs(x))
+    return peak * x / peak_val if peak_val > 0 else x
+
+
+def make_bike_bell_ring(duration_sec: float, fs: int, f0: float = 3000.0,
+                        strike_rate_hz: float = 30.0, burst_sec: float = 0.65,
+                        gap_sec: float = 0.6, peak: float = 0.9) -> np.ndarray:
+    """自転車ベルの引き打ち（回転）式「チリリンチリリン」（2026-07-17追加）。
+
+    JIS D 9451 は引き打ちベル・単打ベル・スプリングベルを規定。既存の
+    make_bike_bell=単打「チーン」に対し、本関数はレバーを引く間だけ小刻みに
+    連打される音（連打中は互いに減衰を打ち切るため各打の減衰は短い）。
+    部分音は make_bike_bell と同系（同じベルを速く叩いた音）。
+    """
+    n = int(round(duration_sec * fs))
+    x = np.zeros(n)
+    partials = [
+        (1.00, 1.00, 0.30), (2.40, 0.45, 0.18), (2.70, 0.30, 0.15),
+        (3.80, 0.22, 0.10), (5.30, 0.12, 0.07), (6.80, 0.06, 0.05),
+    ]
+    tau_scale = 0.35   # 連打で減衰が打ち切られるぶん短く
+    t_cursor = 0.0
+    while t_cursor < duration_sec:
+        burst_end = min(t_cursor + burst_sec, duration_sec)
+        ts = t_cursor
+        while ts < burst_end:
+            i0 = int(ts * fs)
+            m = n - i0
+            if m <= 0:
+                break
+            tt = np.arange(m) / fs
+            tone = np.zeros(m)
+            for ratio, amp, tau in partials:
+                tone += amp * np.exp(-tt / (tau * tau_scale)) \
+                    * np.sin(2.0 * np.pi * f0 * ratio * tt)
+            x[i0:] += tone
+            ts += 1.0 / strike_rate_hz
+        t_cursor = burst_end + gap_sec
+    peak_val = np.max(np.abs(x))
+    return peak * x / peak_val if peak_val > 0 else x
