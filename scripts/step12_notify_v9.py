@@ -41,11 +41,20 @@ import soundfile as sf  # noqa: E402
 
 from outdoor_seld.calibration import frame_spl_a  # noqa: E402
 
+def _argval(flag, default=None):
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
 V91 = "--v91" in sys.argv
 _SUF = "_1" if V91 else ""
 DS = ROOT / "out" / f"dataset_outdoor_siren_v9{_SUF}"
 PRED = ROOT / "out" / f"predictions_v9{_SUF}"
 OUT = ROOT / "out" / f"step12_notify_v9{_SUF}"
+# fold3（最終テスト）採点用（監査 o3-r6 指摘1）: --split fold3 --pred <out相対CSV> [--out <名>]
+SPLIT = _argval("--split")           # None=既定(val+scenario) / "fold3"
+PRED_OVERRIDE = _argval("--pred")    # out/ からの相対CSVパス
+if _argval("--out"):
+    OUT = ROOT / "out" / _argval("--out")
 
 CLASSES = ["Siren", "Horn", "BackupBeep", "BikeBell", "CarDrive", "Crossing"]
 CAR = 4
@@ -265,10 +274,15 @@ def main():
     core = list(csv.DictReader(open(DS / "plan" / "assignment_core.csv")))
     scen = list(csv.DictReader(open(DS / "plan" / "assignment_scenario.csv")))
     roster = {"val": [r["clip_id"] for r in core if r["split"] == "fold2"],
-              "scenario": [r["clip_id"] for r in scen]}
+              "scenario": [r["clip_id"] for r in scen],
+              "fold3": [r["clip_id"] for r in core if r["split"] == "fold3"]}
 
-    for tag in ("val", "scenario"):
-        pred = load_pred(PRED / f"{tag}_all.csv")
+    # SPLIT指定時はその1集合のみ（fold3=最終テスト、監査指摘1）。予測は --pred で差し替え可
+    tags = (SPLIT,) if SPLIT else ("val", "scenario")
+    for tag in tags:
+        pred_path = (ROOT / "out" / PRED_OVERRIDE) if PRED_OVERRIDE \
+            else PRED / f"{tag}_all.csv"
+        pred = load_pred(pred_path)
         rows = []
         clips = roster[tag]
         n_missing = sum(1 for c in clips if c not in pred)
