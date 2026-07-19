@@ -95,7 +95,8 @@ src/outdoor_seld/     geometry.py  座標変換・放射時刻ソルバ（音と
                       labels.py    DCASE 5列CSV生成（放射時刻補正済みDOA）
                       scene.py     シーン定義＋DynamicSoundラッパ＋デシメータ
                       siren.py     合成サイレン（wail 650-1450 Hz＋倍音）
-tests/                単体テスト25項目（DynamicSound内部との照合含む）
+tests/                単体テスト4ファイル・計39チェック 全PASS
+                      （geometry 12 / foa 13 / noise 8 / fastsim 6、DynamicSound内部照合含む）
 scripts/              step0〜step5 実行スクリプト
 out/step0/            検証レポート step0_report.md＋図＋step0_results.json
 out/clip/             ドライ音源、モノラル2種、FOA 2種(direct/withrefl)、ラベルCSV、
@@ -143,13 +144,17 @@ out/figures/          doa_labels_vs_iv.png（★最重要成果物）、spectrog
 - Step 0 (b) の 20 kHz 帯で理論(−178 dB)と乖離(+39 dB)があるのは 513 タップ FIR の
   阻止域実現限界（≈−140 dB）で、物理モデルの誤りではない。
 
-## 次の一手（2026-07-18更新。設計の正= out/v9_2_design_2026-07-18.md ほか）
+## 次の一手（2026-07-19更新）
 
-1. **v9.2の生成・学習**（第4回監査の通過後）: 学習追加180本（複数車・車なし・同クラス警告×2）
-   → EXP_NAME=outdoor_siren_v9_2_run1 → 既存全試験で前後比較
-2. **ゼミ8/4の資料づくり**（材料は完備: 検出限界カーブ・6シナリオ・v9→v9.1比較・
-   通知3役割・v10a発見3件・ablation計画第4版+事前登録）
-3. 8月: 実録スモーク収録・評価（out/v10_plan トラックB）＋環境実測・文献宿題
+- **完了済み**: v9.2 の生成・学習・評価（複数車 0→58.7% ほか、正= out/v9_2_results_2026-07-19.md）、
+  因果推論によるリアルタイム性検証（out/causal_realtime_2026-07-19.md）。
+- **第5回監査（外部）対応**: 評価層の修正（通知時刻+0.1s補正・誤通知率のPoisson上限・
+  Wilson区間・分母是正）を実装済み。正= **out/audit5_response_2026-07-19.md**。
+
+1. **ゼミ8/4の資料づくり**（骨子= out/seminar_20260804_outline.md、別途進行中）
+2. **要Colab**: fold3での最終テスト評価（現数値は開発性能）、batch=1の実時間ベンチ、
+   車イベント数を揃えた対照の再学習（audit5 の残タスク5節）
+3. 8月: 実録スモーク収録・評価＋環境実測・文献宿題
 4. 8/4後: ablation 5本（out/ablation_plan_2026-07.md 8節。通知採点= scripts/step12_notify_v9.py）
 
-（v9.1までの生成・学習・通知層・シナリオ・v10aはすべて完了済み。経緯はPROGRESS.md）
+（v9.2までの生成・学習・通知層・シナリオ・v10a・因果推論はすべて完了済み。経緯はPROGRESS.md）

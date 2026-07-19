@@ -51,6 +51,52 @@ CLASSES = ["Siren", "Horn", "BackupBeep", "BikeBell", "CarDrive", "Crossing"]
 CAR = 4
 FPS = 10  # 0.1s/frame
 
+
+def emit_time(k):
+    """出力フレーム k の検出が因果的に利用可能になる時刻[s]。
+
+    フレーム k は音声区間 [k/FPS, (k+1)/FPS) を表すため、未来を見ずに通知を出せる
+    最速時刻は区間終端の (k+1)/FPS。従来は k/FPS を使いリード/遅延を一律0.1s
+    楽観方向にずらしていた（監査 o3-r6 指摘3、2026-07-19 修正）。可聴開始オラクルにも
+    同一規約を適用するため、モデル-オラクル差は不変で全リードが一律 -0.1s になる。
+    方向誤差・距離の GT サンプル時刻は監査対象外のため従来どおり（変更しない）。
+    """
+    return (k + 1) / FPS
+
+
+def poisson_upper95(count, exposure_hours):
+    """観測 count 件/exposure_hours 時間 のPoisson率[件/時]の片側95%上限（正確法）。
+
+    count=0 のとき rule-of-3（≈3/T）に一致。誤通知フロアを「ゼロ回/時」と断定せず
+    「観測ゼロ→95%上限 X 回/時まで」と述べるために使う（監査 o3-r6 指摘6）。
+    """
+    from scipy.stats import chi2
+    if exposure_hours <= 0:
+        return float("inf")
+    return float(chi2.ppf(0.95, 2 * count + 2) / 2.0 / exposure_hours)
+
+
+def wilson_ci(k, n, z=1.96):
+    """二項比率 k/n の95% Wilson score 信頼区間 (lo, hi)。n=0 は (0,1)。
+
+    単一シード・n=20 中心の率（例 20/20, 0/20）に区間を添えるため（監査 o3-r6）。
+    """
+    if n == 0:
+        return 0.0, 1.0
+    p = k / n
+    d = 1.0 + z * z / n
+    c = p + z * z / (2 * n)
+    h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return (c - h) / d, (c + h) / d
+
+
+def fmt_rate(k, n):
+    """'k/n (P% [95%CI lo–hi])' 形式の文字列。Wilson区間。"""
+    if not n:
+        return f"{k}/{n}"
+    lo, hi = wilson_ci(k, n)
+    return f"{k}/{n} ({100 * k / n:.0f}% [95%CI {100 * lo:.0f}–{100 * hi:.0f}])"
+
 # ルールv1定数（事前決定）
 WARN_CONFIRM = 3          # 0.3s 連続
 CAR_WIN = 10              # 1.0s 窓
@@ -179,7 +225,7 @@ def score_clip(clip, pred_clip, rows_out):
                 if t_on * FPS - 1 <= k <= (t_off + 1.0) * FPS]
         if cand:
             k, az = cand[0]
-            latency = k / FPS - t_on
+            latency = emit_time(k) - t_on
             gaz = gt_az_at(scene, src["class"], k / FPS)
             daz = abs((az - gaz + 180) % 360 - 180) if gaz is not None else np.nan
             warn_results.append((src["class"], True, latency, daz))
@@ -192,7 +238,7 @@ def score_clip(clip, pred_clip, rows_out):
     if car_src is not None:
         t_cpa = scene.get("cpa_rel_time_s")
         fires_car = fired_by_cls[CAR]
-        t_fire = fires_car[0][0] / FPS if fires_car else None
+        t_fire = emit_time(fires_car[0][0]) if fires_car else None
         t_aud = car_src.get("t_first_audible_s")
         car = {"tier": scene["row"]["danger_tier"], "t_cpa": t_cpa,
                "t_fire": t_fire,
@@ -214,11 +260,20 @@ def main():
     report = ["# step12 通知層v1 採点（v9 run1、2026-07-17）", ""]
     percl = []
 
+    # 評価名簿は「予測に現れたクリップ」ではなく plan の割当から取る（監査 o3-r6）。
+    # 完全検出失敗（予測ゼロ）のクリップも分母に残すため。val=fold2 / scenario=割当表。
+    core = list(csv.DictReader(open(DS / "plan" / "assignment_core.csv")))
+    scen = list(csv.DictReader(open(DS / "plan" / "assignment_scenario.csv")))
+    roster = {"val": [r["clip_id"] for r in core if r["split"] == "fold2"],
+              "scenario": [r["clip_id"] for r in scen]}
+
     for tag in ("val", "scenario"):
         pred = load_pred(PRED / f"{tag}_all.csv")
         rows = []
-        for clip in sorted(pred):
-            score_clip(clip, pred[clip], rows)
+        clips = roster[tag]
+        n_missing = sum(1 for c in clips if c not in pred)
+        for clip in clips:
+            score_clip(clip, pred.get(clip, {}), rows)
 
         # ---- 集計 ----
         warn_all = [w for _, ws, _ in rows for w in ws]
@@ -227,9 +282,12 @@ def main():
         lat = np.array([w[2] for w in notified])
         daz = np.array([w[3] for w in notified if np.isfinite(w[3])])
         report.append(f"## {tag}（{len(rows)}クリップ）")
+        if n_missing:
+            report.append(f"- ⚠️ 予測ゼロ（完全検出失敗）で分母に残したクリップ: {n_missing}本")
         if n_warn:
+            _wlo, _whi = wilson_ci(len(notified), n_warn)
             report.append(f"- 警告音イベント {n_warn}件: 通知 {len(notified)}件 "
-                          f"({len(notified)/n_warn:.1%})、発火遅れ中央値 "
+                          f"({len(notified)/n_warn:.1%} [95%CI {_wlo:.1%}–{_whi:.1%}])、発火遅れ中央値 "
                           f"{np.median(lat):.2f}s / p90 {np.percentile(lat, 90):.2f}s、"
                           f"通知方向誤差 中央値 {np.median(daz):.1f}°")
             byc = defaultdict(lambda: [0, 0, []])
@@ -251,9 +309,10 @@ def main():
             leads = np.array([c["lead"] for c in fired])
             oleads = np.array([c["oracle_lead"] for c in danger
                                if c["oracle_lead"] is not None])
+            _clo, _chi = wilson_ci(len(fired), len(danger))
             report.append(
                 f"- 危険層の車 {len(danger)}台: 通知 {len(fired)}台 "
-                f"({len(fired)/len(danger):.1%})")
+                f"({len(fired)/len(danger):.1%} [95%CI {_clo:.1%}–{_chi:.1%}])")
             if len(leads):
                 report.append(
                     f"    リードタイム: 中央値 {np.median(leads):.2f}s / "
@@ -270,7 +329,8 @@ def main():
                           f"({over/len(safe):.1%})（設計: 通知しないのが正解）")
         ff = sum(r[0]["false_fires"] for r in rows)
         hours = len(rows) * 10.0 / 3600.0
-        report.append(f"- 該当イベントなしの誤通知: {ff}件 = {ff/hours:.1f}回/時")
+        report.append(f"- 該当イベントなしの誤通知: {ff}件/{hours:.2f}h = {ff/hours:.1f}回/時 "
+                      f"(Poisson 95%上限 {poisson_upper95(ff, hours):.1f}回/時)")
         # scenario専用: t_pass に対するリードタイム
         if tag == "scenario":
             leads_s = []

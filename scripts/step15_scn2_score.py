@@ -45,7 +45,7 @@ def first_audible(clip, cls_idx):
         for line in f:
             k, c, snr = line.strip().split(",")
             if int(c) == cls_idx and float(snr) >= 0.0:
-                return int(k) / FPS
+                return m12.emit_time(int(k))  # 可聴開始も (k+1)/FPS 規約（指摘3）
     return None
 
 
@@ -78,9 +78,13 @@ def main():
     rows = by_scen["silent_negative"]
     n_fr = sum(len(evs) for _, _, _, p in rows for evs in p.values())
     n_fire = sum(len(f) for _, _, f, _ in rows)
+    s4_hours = len(rows) * 10.0 / 3600.0
+    s4_up = m12.poisson_upper95(n_fire, s4_hours)
     rep += ["## S4 完全静穏（音源ゼロ 20本）",
             f"- 誤検出フレーム: **{n_fr}** / 通知発火: **{n_fire}**"
-            "（車の幻覚も含めて完全ゼロ＝誤通知フロアはゼロ回/時）", ""]
+            f"（車の幻覚も含め観測ゼロ。ただし{s4_hours:.2f}時間の観測なので"
+            f"誤通知率は **Poisson 95%上限 {s4_up:.0f}回/時** までしか言えない"
+            "＝「ゼロ回/時」とは断定しない、指摘6）", ""]
 
     # ---- S1 踏切通過 ----
     rows = by_scen["crossing_wait"]
@@ -99,13 +103,13 @@ def main():
             car_orc.append(t_cpa - ta)
         if byc[4]:
             car_fired += 1
-            car_leads.append(t_cpa - byc[4][0][0] / FPS)
+            car_leads.append(t_cpa - m12.emit_time(byc[4][0][0]))
     L, O = np.array(car_leads), np.array(car_orc)
     rep += ["## S1 踏切通過（警報鳴動中＋背後から車・注意層 20本）",
-            f"- 踏切通知: {cr_ok}/20",
-            f"- **警報のマスキング下の車**: 通知 {car_fired}/20、"
+            f"- 踏切通知: {m12.fmt_rate(cr_ok, 20)}",
+            f"- **警報のマスキング下の車**: 通知 {m12.fmt_rate(car_fired, 20)}、"
             f"リードタイム中央値 {np.median(L):.1f}s / >=2.0s {(L >= 2.0).mean():.0%}"
-            if len(L) else f"- 車の通知 {car_fired}/20",
+            if len(L) else f"- 車の通知 {m12.fmt_rate(car_fired, 20)}",
             f"- オラクル上限: 中央値 {np.median(O):.1f}s / >=2.0s {(O >= 2.0).mean():.0%}"
             f"（可聴{len(O)}/20台）", ""]
 
@@ -120,13 +124,13 @@ def main():
         if cand:
             ok += 1
             k, az = cand[0]
-            lat.append(k / FPS - src["t_on"])
-            leads.append(src["t_cpa_rel_s"] - k / FPS)
+            lat.append(m12.emit_time(k) - src["t_on"])
+            leads.append(src["t_cpa_rel_s"] - m12.emit_time(k))
             gaz = m12.gt_az_at(scene, "bike_bell", k / FPS)
             if gaz is not None:
                 dirs.append(abs((az - gaz + 180) % 360 - 180))
     rep += ["## S2 背後からの自転車ベル（側方0.8-1.5m追い越し 20本）",
-            f"- 通知: {ok}/20、発火遅れ中央値 {np.median(lat):.2f}s、"
+            f"- 通知: {m12.fmt_rate(ok, 20)}、発火遅れ中央値 {np.median(lat):.2f}s、"
             f"**追い越しの {np.median(leads):.1f}s 前**（中央値）に通知",
             f"- 通知方向誤差 中央値 {np.median(dirs):.1f}°"
             "（ほぼ真後ろの音源＝視覚の効かない方向）", ""]
@@ -145,16 +149,16 @@ def main():
         if cand:
             fired[tier] += 1
             k, az = cand[0]
-            res[tier].append(t_cpa - k / FPS)
+            res[tier].append(t_cpa - m12.emit_time(k))
             gaz = m12.gt_az_at(scene, "car_drive", k / FPS)
             if gaz is not None:
                 codir.append(abs((az - gaz + 180) % 360 - 180))
     rep.append("## S3 駐車場のバック車（バック音=車と同一軌道 20本）")
     for t in ("critical", "caution"):
         L = np.array(res[t])
-        rep.append(f"- {t}: 通知 {fired[t]}/{n[t]}、リードタイム中央値 "
+        rep.append(f"- {t}: 通知 {m12.fmt_rate(fired[t], n[t])}、リードタイム中央値 "
                    f"{np.median(L):.1f}s / >=2.5s {(L >= 2.5).mean():.0%}"
-                   if len(L) else f"- {t}: 通知 {fired[t]}/{n[t]}")
+                   if len(L) else f"- {t}: 通知 {m12.fmt_rate(fired[t], n[t])}")
     rep.append(f"- バック音（beep）の通知方向と車真方向の差 中央値 {np.median(codir):.1f}°"
                "（=警告音が車の方向を正しく代弁）")
     rep.append("")
@@ -173,14 +177,14 @@ def main():
         if cand:
             ok += 1
             k, az = cand[0]
-            leads.append(t_cpa - k / FPS)
+            leads.append(t_cpa - m12.emit_time(k))
             dists.append(mic_dist_at(scene, src, k / FPS))
             gaz = m12.gt_az_at(scene, "siren", k / FPS)
             if gaz is not None:
                 dirs.append(abs((az - gaz + 180) % 360 - 180))
     L, O = np.array(leads), np.array(orc)
     rep += ["## S5 悪条件サイレン（暗騒音60-65dB固定×遠方10-15m 20本）",
-            f"- 通知: {ok}/20、リードタイム中央値 {np.median(L):.1f}s / "
+            f"- 通知: {m12.fmt_rate(ok, 20)}、リードタイム中央値 {np.median(L):.1f}s / "
             f">=2.5s {(L >= 2.5).mean():.0%}",
             f"- オラクル上限: 中央値 {np.median(O):.1f}s（差=モデル+ルールの遅れ）",
             f"- 初通知時の距離 中央値 {np.median(dists):.0f}m、"
