@@ -140,7 +140,13 @@ def fire_events(pred_clip, mix_level):
     """1クリップの予測から通知発火列 [(frame, class, az)] を返す（ルールv1）。"""
     fires = []
     last_fires = defaultdict(list)   # class -> [(frame, az)] 方向別不応期用
-    # フレームごとのクラス→(az,el)辞書に整形
+    # フレームごとのクラス→(az,el)辞書に整形。
+    # ⚠️ 既知の限界（監査 o3-r6）: 同一フレーム・同一クラスに複数トラック（例:2台の車）が
+    #    予測されると最後の1件に潰れる。これは通知層 v1 が「車接近＝単一アラート」設計
+    #    （3役割: 警告音=個別/車接近=弱通知/至近車=強振動）で per-track の方向別通知を
+    #    出さないため許容している。**複数車の同時検出率(step16)には非影響**——step16は
+    #    load_pred_multi で全トラックを保持して数える。将来 per-car 方向通知を出すなら
+    #    ここを list 化して firing を多重トラック対応に拡張する（コミット済み数値が変わる）。
     byframe = {k: {c: (a, e) for c, a, e in evs} for k, evs in pred_clip.items()}
 
     def blocked(c, k, az):
