@@ -30,9 +30,28 @@ spec = importlib.util.spec_from_file_location(
 m12 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m12)
 
-DS = ROOT / "out" / "dataset_outdoor_siren_v9_1"
-PRED = ROOT / "out" / "predictions_v9_1" / "scn2_all.csv"
-OUT = ROOT / "out" / "step12_notify_v9_1"
+import argparse  # noqa: E402
+
+
+def _parse():
+    """採点対象のパスを引数化（監査 o3-r6 指摘5: ハードコード解消）。
+    既定は v9.1。v9.2/causal/ctrl は --pred/--out/--title で差し替える。"""
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ds", default="dataset_outdoor_siren_v9_1",
+                    help="out/ 直下のデータセット名（scene.json/foa/masks/plan）")
+    ap.add_argument("--pred", default="predictions_v9_1/scn2_all.csv",
+                    help="out/ からの予測CSV相対パス")
+    ap.add_argument("--out", default="step12_notify_v9_1",
+                    help="out/ 直下の出力フォルダ名")
+    ap.add_argument("--title", default="追加5シナリオ 採点（v9.1 run1、ルールv1。2026-07-18）")
+    return ap.parse_args()
+
+
+_ARGS = _parse()
+DS = ROOT / "out" / _ARGS.ds
+PRED = ROOT / "out" / _ARGS.pred
+OUT = ROOT / "out" / _ARGS.out
+TITLE = _ARGS.title
 CLSIDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3,
           "car_drive": 4, "crossing": 5}
 CLASSES = ["Siren", "Horn", "BackupBeep", "BikeBell", "CarDrive", "Crossing"]
@@ -72,7 +91,7 @@ def main():
         fires = m12.fire_events(pred.get(clip, {}), frame_spl_a(mix[0], 24000))
         by_scen[row["scenario"]].append((clip, scene, fires, pred.get(clip, {})))
 
-    rep = ["# 追加5シナリオ 採点（v9.1 run1、ルールv1。2026-07-18）", ""]
+    rep = [f"# {TITLE}", ""]
 
     # ---- S4 完全静穏（先に=ヘッドライン） ----
     rows = by_scen["silent_negative"]
