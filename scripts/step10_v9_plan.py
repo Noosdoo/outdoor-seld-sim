@@ -137,10 +137,13 @@ def build_motion_group(split: str, motion: str, n_clips: int, rng: np.random.Gen
     return all_rows
 
 
-def build_core() -> list:
+def build_core(splits: dict = SPLITS, seed: int = GLOBAL_SEED) -> list:
+    """splits/seedを外から指定可能（既定=v9本来の値で完全後方互換）。
+    v10（out/v10_design_2026-07-21.md）でTAU-NIGENS相当規模に拡大する際、
+    このバランス設計（クラス×層×側の均衡アルゴリズム）をそのまま再利用する。"""
     rows = []
-    for split, n in SPLITS.items():
-        rng = np.random.default_rng(GLOBAL_SEED * 2741 + {"fold1": 1, "fold2": 2, "fold3": 3}[split])
+    for split, n in splits.items():
+        rng = np.random.default_rng(seed * 2741 + {"fold1": 1, "fold2": 2, "fold3": 3}[split])
         # +1を貰うクラスの並びを分割ごとに1回抽選し、静止が先頭r個・歩行が次のr個を取る
         n_by_w_half = exact_counts(n // 2, FRAC_W)
         r = (n_by_w_half[1] + 2 * n_by_w_half[2]) % 5
@@ -155,10 +158,10 @@ def build_core() -> list:
         rows = [r for r in rows if r["split"] != split] + [split_rows[i] for i in perm]
     # クリップID・seed付与（split内連番）
     idx_global = 0
-    for split in SPLITS:
+    for split in splits:
         for i, row in enumerate([r for r in rows if r["split"] == split]):
             row["clip_id"] = f"{split}_room1_mix{i + 1:03d}"
-            row["seed"] = GLOBAL_SEED * 613 + idx_global
+            row["seed"] = seed * 613 + idx_global
             idx_global += 1
     return rows
 
@@ -376,10 +379,10 @@ def class_events(rows, filt=None):
     return cnt
 
 
-def check_core(rows: list) -> list:
+def check_core(rows: list, splits: dict = SPLITS) -> list:
     """全数検算。返り値=レポート行。assert失敗=計画不合格。"""
     rep = []
-    for split, n in SPLITS.items():
+    for split, n in splits.items():
         sr = [r for r in rows if r["split"] == split]
         assert len(sr) == n, (split, len(sr))
         for motion in ["static", "walk"]:
@@ -410,12 +413,19 @@ def check_core(rows: list) -> list:
         assert max(vals) - min(vals) <= 1, (split, ev)
 
         # 交絡チェック（クロス表の行内 max-min）: クラス×側 / クラス×層 / 層×側 / 層×音源数
+        # 許容差はv9本来の規模(SPLITS)を基準に sqrt(n比) でスケール
+        # （±1remainderの独立蓄積は本数の平方根で伸びるため。v9本来の規模ではscale=1.0で
+        # 旧来の固定許容差と完全一致=後方互換）。
+        import math
+        scale = max(1.0, math.sqrt(n / SPLITS[split]))
+
         def spread(tab, a_vals, b_vals, tol, name):
+            tol_s = math.ceil(tol * scale)
             worst = 0
             for a in a_vals:
                 row = [tab[(a, b)] for b in b_vals]
                 worst = max(worst, max(row) - min(row))
-            assert worst <= tol, (split, name, worst, tab)
+            assert worst <= tol_s, (split, name, worst, tol_s, tab)
             return worst
 
         # 警告イベント単位のクラス×側

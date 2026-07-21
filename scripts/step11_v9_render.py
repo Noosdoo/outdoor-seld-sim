@@ -52,7 +52,8 @@ from outdoor_seld.labels import (frame_label_rows, read_dcase_csv,  # noqa: E402
                                  write_dcase_csv)
 from outdoor_seld.noise import diffuse_foa_noise  # noqa: E402
 from outdoor_seld.scene import decimate_to_out_rate  # noqa: E402
-from outdoor_seld.siren import make_peepo_siren, make_siren  # noqa: E402
+from outdoor_seld.siren import (make_fire_siren, make_peepo_siren,  # noqa: E402
+                                make_siren)
 
 # --v91 = v9.1: 音源精査（out/source_audit_2026-07-17.md）の修正3点だけを反映した版。
 #   ①踏切→make_crossing_v2（和音・打撃・余韻） ②wailサイレン→日本のパトカー仕様
@@ -63,10 +64,26 @@ from outdoor_seld.siren import make_peepo_siren, make_siren  # noqa: E402
 #   （監査H5-3: v9.1フォルダへの追記は版管理違反 → out/dataset_outdoor_siren_v9_2_add/）。
 #   音源はv9.1仕様（--v92は--v91を含意）。Colab側でのみ datasets/outdoor_siren_v9_1/ に
 #   マージ展開する。設計= out/v9_2_design_2026-07-18.md（6節の改訂込み）
-V92 = "--v92" in sys.argv
+# --v93 = 舞台=日本の適合性監査（out/japan_stage_audit_2026-07-21.md）を受けた修正。
+#   クラクション・バック警告音の法規レンジをJP一次資料（道路運送車両の保安基準）に
+#   差し替え（旧はECE R28/OSHA由来）。v9.1と完全同一の割当表・幾何・シードで
+#   全量再生成し、horn/backup_beepを含まないクリップは旧版とビット一致する
+#   （v9.1が音源3クラスのみ変更してv9とビット一致を保った方式を踏襲）。
+#   車速レンジ（生活道路30km/h、2026-09-01施行）は未反映＝別途判断（監査4節）。
+# --v10_1 = 本人指摘「消防車のサイレンの音なくない？」（2026-07-21）への対応。
+#   siren クラスにfire型（消防車「ウーウー」、wailより低め）を追加。
+#   **RNG最小撹乱設計**: peepo分岐は完全無変更（既存クリップと同一）。
+#   wail分岐の先頭にのみ新規rng.random()を1回追加し、その結果でfire/wailを
+#   再割当する——つまり影響を受けるのはv10で既にwailと判定された枠のみ
+#   （scene.jsonのparams.siren_typeで特定可能）。周波数(350-650Hz)は文献に
+#   一次資料なし=仮置き（wailのf_lo=435Hz仮置きと同じ扱い、8月実測で検証）。
+V10_1 = "--v10_1" in sys.argv
+V93 = "--v93" in sys.argv
+V92 = ("--v92" in sys.argv) or V93
 V91 = ("--v91" in sys.argv) or V92
-DS_NAME = ("outdoor_siren_v9_2_add" if V92
-           else ("outdoor_siren_v9_1" if V91 else "outdoor_siren_v9"))
+DS_NAME = ("outdoor_siren_v9_3" if V93
+           else ("outdoor_siren_v9_2_add" if V92
+           else ("outdoor_siren_v9_1" if V91 else "outdoor_siren_v9")))
 DS = ROOT / "out" / f"dataset_{DS_NAME}"
 # 割当表の正はv9のplan（v9.1も同一の表を使う。来歴用にv9.1側へもコピーされる）
 PLAN = ROOT / "out" / "dataset_outdoor_siren_v9" / "plan"
@@ -87,6 +104,14 @@ CLASS_IDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3,
 LAW = {"siren": (90.0, 120.0, 20.0), "horn": (93.0, 112.0, 7.0),
        "backup_beep": (87.0, 112.0, 1.2), "bike_bell": (80.0, 95.0, 1.0),
        "crossing": (75.0, 85.0, 1.0), "car_drive": (60.0, 67.0, 10.0)}
+if V93:
+    # 舞台=日本の適合性監査（out/japan_stage_audit_2026-07-21.md）でJP一次資料に差替え。
+    # horn: 旧ECE R28(93-112dB@7m) → 道路運送車両の保安基準第43条/告示219号別添74
+    #   （87-112dB(A)@7m、日本の乗用車も同じ7m基準）
+    # backup_beep: 旧OSHA/米業界標準(87-112dB@1.2m) → 保安基準第145条の6・UN R165準拠
+    #   （車両後退通報装置。「通常」レベル60-75dB必須・音声併用時上限92dB、基準距離1m）
+    LAW["horn"] = (87.0, 112.0, 7.0)
+    LAW["backup_beep"] = (60.0, 92.0, 1.0)
 SPEED = {"siren": (5.0, 15.0), "horn": (5.0, 15.0), "backup_beep": (1.0, 3.0),
          "bike_bell": (3.0, 7.0), "car_drive": (5.0, 15.0)}
 WALK_SPEED = (1.0, 1.4)
@@ -149,6 +174,16 @@ def _warn_params(cls: str, rng: np.random.Generator, seed: int) -> dict:
                     "f_hi": 960.0 * float(rng.uniform(0.97, 1.03)),
                     "f_lo": 770.0 * float(rng.uniform(0.97, 1.03)),
                     "tone_sec": 0.65 * float(rng.uniform(0.9, 1.1))}
+        # st == "wail" 到達分のみ、v10.1では半分を消防車(fire)に再割当。
+        # peepo分岐は上でreturn済みなので一切影響を受けない（既存クリップと同一）。
+        # 各既定値は実録音の周波数解析に基づく（siren.py make_fire_siren docstring参照）。
+        if V10_1 and rng.random() < 0.5:
+            return {"siren_type": "fire",
+                    "f_lo": 361.0 * float(rng.uniform(0.95, 1.05)),
+                    "f_hi": 710.0 * float(rng.uniform(0.97, 1.03)),
+                    "sweep_period_sec": 2.97 * float(rng.uniform(0.9, 1.1)),
+                    "bell_f0": 1150.0 * float(rng.uniform(0.95, 1.05)),
+                    "audio_seed": seed * 7 + 11}
         if V91:
             # 日本のパトカー: 最高870Hz・折り返し4秒/8秒の2種（source_audit参照）。
             # 下限は出典未発見→1オクターブ下435Hzを仮置き（8月実測で検証）
@@ -559,6 +594,11 @@ def sample_scene_v9(row: dict) -> dict:
 def _make_dry(src: dict) -> np.ndarray:
     cls, p = src["class"], src["params"]
     if cls == "siren":
+        if p["siren_type"] == "fire":
+            rng = np.random.default_rng(p["audio_seed"])
+            return make_fire_siren(CLIP, FS_SIM, rng=rng,
+                                   **{k: v for k, v in p.items()
+                                      if k not in ("siren_type", "audio_seed")})
         gen = make_peepo_siren if p["siren_type"] == "peepo" else make_siren
         return gen(CLIP, FS_SIM, **{k: v for k, v in p.items()
                                     if k != "siren_type"})
