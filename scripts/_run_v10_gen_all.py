@@ -14,6 +14,31 @@ m9 = m10.m9
 
 SETS = ["core", "scenario", "probe", "scenario2", "v10a"]
 
+
+def _assert_not_patched() -> None:
+    """v10.1パッチ適用後の誤再実行ガード（2026-07-21 Fable精査で追加）。
+
+    本スクリプトはV10_1=Falseで動くため、パッチ適用済みデータセットの上で再実行すると
+    fire化した318本が黙ってwail版に巻き戻る。fire型クリップを検出したら停止する。
+    全量作り直しの意図がある場合のみ --force を付けて実行する。
+    """
+    if "--force" in sys.argv:
+        return
+    import json
+    for sj in m9.WORK.glob("*/scene.json"):
+        try:
+            scene = json.loads(sj.read_text())
+        except Exception:
+            continue
+        if any(s.get("params", {}).get("siren_type") == "fire"
+               for s in scene.get("sources", [])):
+            sys.exit(f"ABORT: v10.1パッチ適用済みデータセットを検出（例: {sj.parent.name}）。"
+                     f"このまま再実行すると消防車サイレンがwailに巻き戻ります。"
+                     f"全量再生成の意図がある場合のみ --force を付けてください。")
+
+
+_assert_not_patched()
+
 t0 = time.time()
 total_done = 0
 for which in SETS:

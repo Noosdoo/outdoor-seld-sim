@@ -75,9 +75,19 @@ from outdoor_seld.siren import (make_fire_siren, make_peepo_siren,  # noqa: E402
 #   **RNG最小撹乱設計**: peepo分岐は完全無変更（既存クリップと同一）。
 #   wail分岐の先頭にのみ新規rng.random()を1回追加し、その結果でfire/wailを
 #   再割当する——つまり影響を受けるのはv10で既にwailと判定された枠のみ
-#   （scene.jsonのparams.siren_typeで特定可能）。周波数(350-650Hz)は文献に
-#   一次資料なし=仮置き（wailのf_lo=435Hz仮置きと同じ扱い、8月実測で検証）。
+#   （scene.jsonのparams.siren_typeで特定可能）。既定値は実録音の実測
+#   （361-710Hz・掃引2.97s・鐘1150Hz、正=siren.py make_fire_siren docstring。
+#   2026-07-21のFable独立再解析でも全パラメータ一致を確認済み）。
+# --v10_1b = backup_beepのdBレンジ修正（2026-07-21 Fable精査で発見した2規定混同の是正）。
+#   旧v93値(60-92dB@1m)は「UN R165通常60-75dB（後方7m評価）」と「音声式併設時の
+#   合計上限92dB@1m」という別規定の混同だった（正=japan_stage_audit 8節）。
+#   本人決定（2026-07-21「混ぜましょう。舞台は日本にしたい」）に従い、
+#   ①実勢ブザー系（85-95dB@1m、ミツバ/YEC/DENSO等カタログ実値。R165以前は
+#   法規・JIS規格なし=任意が実態）②新基準系（UN R165通常60-75dB@7m）の
+#   50:50混合抽選にする。**RNG最小撹乱**: 追加のrng消費はbackup_beep行のみ
+#   =backup_beepを含まないクリップはビット一致を維持（V10_1と同じ設計）。
 V10_1 = "--v10_1" in sys.argv
+V10_1B = "--v10_1b" in sys.argv
 V93 = "--v93" in sys.argv
 V92 = ("--v92" in sys.argv) or V93
 V91 = ("--v91" in sys.argv) or V92
@@ -159,7 +169,20 @@ def _mic_pos_at(mic, t: float) -> np.ndarray:
     return receiver_positions_at(np.array([t]), mic)[0]
 
 
+# v10.1b: backup_beepの2系統レンジ（(lo, hi, 基準距離m)。根拠はjapan_stage_audit 8節）
+LAW_BACKUP_LEGACY = (85.0, 95.0, 1.0)   # 実勢ブザー: ミツバRH-11 88±4dB/1m・YEC 90dB・
+                                        # DENSO 85±10dB(A)/1.5m等のカタログ公称域
+LAW_BACKUP_R165 = (60.0, 75.0, 7.0)     # UN R165「通常」レベル（必須）。細目告示145条の6
+                                        # が規則6.を引用、後方7m・高さ0.5-1.5mの最大値評価
+
+
 def _draw_level(cls: str, rng: np.random.Generator) -> tuple:
+    if V10_1B and cls == "backup_beep":
+        # 実勢系:新基準系=50:50混合。backup_beep行でのみ追加のrng消費が発生する
+        which = LAW_BACKUP_LEGACY if rng.random() < 0.5 else LAW_BACKUP_R165
+        lo, hi, ref = which
+        lv = float(rng.uniform(lo, hi))
+        return lv, lv + 20.0 * np.log10(ref)
     lo, hi, ref = LAW[cls]
     lv = float(rng.uniform(lo, hi))
     return lv, lv + 20.0 * np.log10(ref)          # (法規値, 1m相当レベル)
