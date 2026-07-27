@@ -1442,3 +1442,164 @@ ctrlclip（クリップ数一致対照）の学習・推論・採点が完了し
   room7=S2/room8=S1、ラベル実測で確定）→ データ構成一覧docを修正。傾き試験の
   シナリオ枠はS3になった（結論には影響なし、ベル追試はセルroom変更で可）
 - 残るColab作業はfold3最終テスト（先生と相談後・1回のみ）だけ
+
+## データセット十分性監査＋v11拡張設計（2026-07-26〜27、別セッション=Opus 5作）
+本人の学習理解セッション（①物理〜⑮監査の通し解説）の流れで実データ監査を実施:
+- **判定「合成研究としては十分、実用主張には実録が要る」**。穴4つ（重要度順）:
+  🔴実録0本 / 🟠評価n=20の統計的弱さ（100%でもWilson下限83.9%）/
+  🟡coreの網羅性（全クリップ車1台・「警告のみ車なし」0%）/ 🟡fold間がseed違いのみ（OOD無し）。
+  要約= md/audit/データセット十分性監査_2026-07-26.md
+- **v11設計確定**（正= md/design/v11データセット拡張_設計書_2026-07-27.md、本人決定07-27）:
+  core 3,600→7,200本(20h=DCASE2023合成相当、split 4:1:1)・学習分布=自然頻度寄せ＋
+  重要セルフロア（警告のみ≥400/純静穏≥300/複数車≥1500合計）・評価増量（幻覚/safe→600、
+  S1/複数車/S5→200）・新種シナリオN1〜N7全部・実録アンカーは後回し（合成先行）
+- **新診断: threshold_unify=15°の切り分け**（v10a真2台4,765フレームのローカル実測:
+  両方報告=真の方位差 中央118.5° / 片方落ち=中央9.0°・<15°が65.4%）→ 近接2台の
+  取りこぼしが62.5%頭打ちの主因候補。設計書§4.5にデコーダ閾値掃引実験を設計
+  （統合前トラック別出力の保存に再推論が必要、submoduleは編集せず引数化）
+- 引き継ぎ= md/design/v11_Fable引き継ぎ_2026-07-27.md（**実装はFableに委譲**、着手順7項）
+
+## Fable引き継ぎ完了（2026-07-27午後）
+- v11設計書をコミット 2f96f8f4 でpush（7/21-23分は本人が7/25にコミット済みと確認）
+- 引き継ぎメモ・設計書全文・メモリ更新分を通読、監査要約を md/audit/ に新設（設計書の指示）
+- 次の実装着手順（設計書§7）: ①step10_v11_plan.py ②step11_v11_render.py→precheck→分割生成
+  ③評価増量＋N1-N7 ④Colab学習(EXP=outdoor_siren_v11_run1) ⑤fold3最終1回 ⑥閾値掃引 ⑦実録
+
+## v11実装①完了: core割当表7,200行・全数検算パス（2026-07-27）
+scripts/step10_v11_plan.py 新設（正= out/dataset_outdoor_siren_v11/plan/plan_check_report.md、
+実装確定値は設計書§1.4に記録）:
+- **7,200行**（fold1 4800/fold2 1200/fold3 1200=20h）、md5=3169fd7f027d614045442536042c1f77
+- シーン種別 住宅40/生活40/幹線20 → **n_car周辺分布 18/47/23/12%を厳密実現**、
+  n_warn 45/40/15%、フロア全合格（fold1: 警告のみ474/純静穏390/複数車1,680）
+- 同一クラス警告×2はペア13型循環で242本（v10.2 C枠の吸収）。クラス別イベントは
+  split×motion内で完全一致（fold1各336/fold2・3各84）
+- 新機構: 層別整数割付 alloc_levels（warnレベル⊥(scene,n_car)、列合計厳密）＋
+  低不一致散布 spread_sequence（クラス⊥n_car、どの層でも比例±1）
+- シード=20260727×613+200000〜（既存全plan 7,970シードと衝突ゼロを機械検証、
+  評価枠は+210000から予約）
+- 次=②step11_v11_render.py（`v11core`専用サンプラ: ①マイク②車n_car台③w1④w2⑤暗騒音、
+  t_cpa: 1台=CAR_TCPA/複数=U(4,9)。既存traffic経路はw2非対応のため新設が必要と確認済み）
+
+## v11実装前精査（2026-07-27、本人指示「実装の前にもう一回精査してください」）
+正= md/design/v11データセット拡張_設計書_2026-07-27.md §1.5。要点:
+- 割当表を**実装非依存の別スクリプトで独立再検算**（期待値は手計算ハードコード）:
+  構造・分布・フロア・クラス均衡・シード衝突(既存7,970個)・ペア規約・mix無相関 全PASS。
+  tier×警告数の偏差5〜7はv9同式のsqrt(規模)許容(9/7)内→plan側check_coreにも同チェックを
+  追加し再実行、core md5不変(3169fd7f…)を確認
+- **🔴重大発見: 純静穏582本=空ラベルCSVがPSELDNets preprocをEmptyDataErrorで落とす**
+  （v10の既知の罠がv11設計の中核と衝突）→ **ノートブック側モンキーパッチで解決を実証**
+  （load_output_format_file→{99:[]}・read_csv→番兵行。イベント混入ゼロ・num_frames=100・
+  mACCDOA/ADPIT経路OK・pin済みsubmodule非接触）。v11ノートブックに空ラベル許容preprocセルを
+  新設し、従来の除外セルは廃止する方針
+- 評価専用セットは**再生成不要**（v11は物理変更ゼロ→v10アセットとビット同一、zip共用）
+- 下流互換OK（全消費者DictReader・固定幅mixパースなし）。レンダラはn_carのint()が必要。
+  C:空き65GB=生成可。plan_check_reportのmd5はLF基準（ディスクCRLF、従来慣行）
+
+## v11実装②: レンダラ完成・preflight全PASS・全量生成開始（2026-07-27夕）
+- **scripts/step11_v11_render.py 新設**: v10.1bチェーン継承（物理・音源・較正は無変更=
+  評価セットのビット同一性を保つ）＋`v11core`専用サンプラ（乱数消費順 ①マイク②車n_car台
+  ③w1④w2⑤暗騒音、車t_cpa: 1台=CAR_TCPA(6-9s)/複数=U(4,9)、同一クラスw2はtrack=1）。
+  出力=out/dataset_outdoor_siren_v11/（独立フォルダ）。ドライバ=scripts/_run_v11_gen.py
+- **precheck（7,200行の解析計算）**: plan実現値の不一致0行・音源ゼロ582行=設計値ぴったり・
+  CPA検算最大差0.052m・可聴率/AUCは既存版と整合（踏切不可聴18.7%はv9の17.2%と同水準、
+  車リード中央4.8s=JP車速で伸長）。ピーク上限バウンド超過は1行のみ（mix4568=1.046）
+- **preflight全PASS**: 決定論（代表100行2回サンプル一致）＋代表7条件スモーク
+  （純静穏/警告のみ同一クラス×2/踏切/車2台/車3台+警告2/critical車1台/ピーク最大行）
+  検品7/7 PASS。mix4568の実測ピーク0.883<0.99でバウンド超過は解消
+- **colab/cell_v11_preproc_emptyok.py 新設**（空ラベル許容preproc）。パッチは0バイト判定
+  方式——例外catch方式だとread_csvラップが先に働きload側へ番兵行が漏れて
+  「frame99クラス0の偽イベント」になる合成事故を精査で発見し回避
+- **全量生成7,200本を2並列で実行中**（rows 0-3599 / 3600-7199、
+  ログ=out/v11_gen_p1.txt / v11_gen_p2.txt）。今回は**Start-Processで切り離し起動=
+  セッション終了でも生成継続**（7/22の道連れ教訓への対策）。想定5.5〜6.5時間。
+  中断時の再開: ログ進捗マーカー確認→ `_run_v11_gen.py --rows a-b --skip-inspect`
+- 残（②の締め）: 全完了後に inspect 1回 → pack（zip、datasets/outdoor_siren_v11/）。
+  評価専用セットはv10 zipを共用（再生成しない）
+
+## ピーク超過1本 → 棄却再抽選機構を実装して生成再開（2026-07-27夜）
+- p2が fold1_room1_mix3642 の生成時assert（**peak 1.248 >= 0.99**）で停止
+  （p1は正常・50本完了時点で両方いったん停止）
+- 原因: v11の新密度では、合法な条件の裾が絶対較正0dBFS≡143dB SPLのヘッドルームを
+  稀に超える。precheckバウンドが見逃した理由も特定——CREST表のsiren=1.8はwail想定
+  （fire型はbell_mix=0.3後も約2.3）＋fire基本361HzはA特性−3dBぶん線形RMSが大きい。
+  **バウンドは参考値に格下げ、正は生成時assert＋再抽選**
+- 対策: **ピーク棄却再抽選**（step11_v11_render.py の generate_clip_v11）。超過クリップ
+  のみ salt付きシード [seed, 20260727, salt] で連続値を引き直す決定論ラダー
+  （plan行の離散条件=クラス/側/tier/n_car は不変。saltは scene.json の
+  peak_resample_salt に記録→全量完了後に件数を集計して記録する）
+- 検証2点: ①salt=0クリップはビット不変（mix3601のmd5一致） ②mix3642はsalt=1で解決
+  （peak 0.065。salt0の構成はsiren+crossingの近接＝fire裾の実例）
+- 生成再開: p1 rows 50-3599 / p2 rows 3642-7199（切り離し起動・ログ同名で継続監視）
+
+## v11 Colabノートブック新規作成（2026-07-27夜、生成と並行）
+- **colab/PSELDNets_outdoor_siren_v11_Colab.ipynb** 新規（v10.2版の構成踏襲、26セル）:
+  学習=v11 [fold1_room1]（EXP=outdoor_siren_v11_run1、T4約7h/100ep、Drive永続化＋
+  last.ckpt自動resume）、評価5種（交差点/プローブ/scn2/v10a/幻覚）=**v10データセットを
+  v11 ckptでクロス推論**（v11は物理同一→評価セットはv10とビット一致のため再アップ不要）
+- v10側は展開後に評価用room（fold2系858本）だけ残す剪定セル（4533→858、前処理時間と
+  ディスク節約。fold1/fold3は学習に使わないため削除）
+- **除外セルは廃止**→空ラベル許容preproc（セル8。0バイト判定ラップの別プロセス実行、
+  v11/v10両データセットに適用。単体セル版= colab/cell_v11_preproc_emptyok.py）
+- 出力CSV命名はv10.2と同じ `infer_{EXP}_{tag}_all.csv` → ローカル採点系がそのまま読める
+- Driveに必要なzip: **新規アップは dataset_outdoor_siren_v11.zip（約9GB）のみ**
+  （v10.zip/v10_2_add.zipは配置済みを流用）
+
+## v11 全量生成・検品完了（2026-07-28未明）
+- **生成7,200本完走**（2並列 各3,550/3,558本・約5.7時間・平均5.8〜6.4s/本）。
+  ピーク棄却再抽選の発生は結局 **mix3642の1本（salt=1）のみ**
+- 空ラベル589本＝設計の純静穏582＋偶発の完全不可聴7（v10の27本と同種）。
+  空ラベル許容preprocにより**除外せず全て学習の負例として残す**（v11設計の狙いどおり）
+- **検品7,200本: FAIL 1本のみ**（fold3_room1_mix0181）。原因=bike_bellの受音レベルが
+  予測比−4.33dBでゲート±3.5dB超過。**数値裏取り済みの良性モード**——打撃が実際に
+  鳴った瞬間の距離重みだけで−3.29dBを説明（検品コード注記の「打音系の偶然相関」、
+  v10でも−3.14dBの前例）。方位0.38°・再構成3.3e-07・騒音±0.00dB・ピーク0.009は全て正常
+  → v10 mix119と同方針で**Colab展開時に除外**（fold3=1,199本）。ノートブック セル6の
+  INSPECT_FAIL に反映済み。正= out/dataset_outdoor_siren_v11/inspection.csv
+- pack（zip作成、datasets/outdoor_siren_v11/名前空間）実行中
+
+## v11 zip完成 → 実装②完了（2026-07-28朝）
+- **out/dataset_outdoor_siren_v11.zip = 8.8GB**（7,200本収録。検品FAIL1本の除外は
+  Colabセル6のINSPECT_FAILが実施→学習4,800/val 1,200/test 1,199）
+- 本人の次アクション: zipを Drive PSELDNets_data/ へアップロード →
+  colab/PSELDNets_outdoor_siren_v11_Colab.ipynb を上から実行（学習約7h、自動resume対応）
+- Fableの次: ③評価セット増量＋新種N1-N7の実装（Colab学習と並行で進められる）
+
+## Colab学習開始でEmptyDataError → 学習側にも空ラベル許容ラッパ追加（2026-07-28朝）
+- 本人がv11ノートブックを実行、学習開始直後に停止（train 4800/valid 1200まで読めて
+  datamodule構築で EmptyDataError）。原因= **PSELDNets data/components/data.py:98 が
+  valのGTを生CSVから読み直す**（preprocとは別経路、dataset_type=='valid'時のみ）→
+  fold2_room1の純静穏96本+偶発分の0バイトCSVで停止
+- 対策: **_train_emptyok.py**（load_output_format_file→{99: []}=イベント0件GT。
+  utils.data_utilities と data.components.data（from-import名）の両方を差し替え、
+  train.pyをrunpyで起動）。val指標に偽イベントは混入しない。infer(mode=test)は
+  GTを読まないため対象外
+- ノートブック更新（セル8がラッパ2本を書き出し、セル10は `!python _train_emptyok.py`）。
+  本人のColabへは追加セル＋train置換の差分を提示（再展開・再preprocは不要）
+- 教訓: **空ラベルの読者は「前処理」と「学習時のval GTローダ」の2箇所**。新しい前提
+  （空ラベルを正データにする）を通すときは、同じファイルを読む全経路を洗うこと
+
+## 第6回監査（ChatGPT Sol5.6）対応完了（2026-07-28、正= md/audit/v11実装まとめ §6）
+指摘9件は全て妥当と判定し全対応（詳細な対応表はまとめ§6）:
+- **PSELDNets pin解決**: gitlink 8092a14=upstream先端。ローカル4a3d4b90は本人の
+  成果物追加コミット（07-25「え」）で**コード差分ゼロを実測**→ノートブックに
+  コミットcheckout+assert、ckpt SHA256 assertを追加
+- **ピーク再抽選の記述訂正**: 「連続値のみ」→「シーン内の全乱数抽選を引き直す」
+  （mix3642はfire→wailに変わっていた。実装は不変、記述の正確化）
+- **マニフェスト二段検証**: manifest_v11.csv＋ダイジェスト6本、Colabセル6は
+  full(7200)照合→FAIL除外→final(7199)照合に変更（部分欠損すり抜けを封鎖）
+- **検証スクリプト強化**: 相対パス・非ゼロ終了・無相関assert・最終版パッチ通し試験＋
+  合成事故の回帰試験（証拠2本= plan/independent_verify_output.txt(exit0)・
+  empty_label_test_output.txt(exit0)）
+- **数値/出典訂正**: Wilson n=200→98.1%、規模の根拠→DCASE2022 Task3公式合成20h、
+  「自然頻度」に用語注（工学的事前分布）
+- 残ブロッカー: clean Colabでの学習完走（本人再実行待ち）。**本対応一式をコミットで固定**
+
+## 外部監査用の証拠固定（2026-07-28、本人指示「ChatGPTに監査かけたい」）
+- **md/audit/v11実装まとめ_外部監査用_2026-07-28.md** 新設: 範囲と現在地・ファイルマップ・
+  設計→実装の適合表・逸脱7項目・検証マトリクス・**未検証の残リスク4項目**・主要数値を集約
+- 会話内にしか無かった証拠をリポジトリへ固定:
+  ①検証スクリプト4本を scripts/ へ（_verify_v11_plan_independent / _test_v11_empty_label_patch /
+  _test_v11_peak_resample / _build_v11_notebook）
+  ②独立再検算を再実行し出力を保存（out/dataset_outdoor_siren_v11/plan/
+  independent_verify_output.txt、ALL PASS。tier×warnの許容は固定±3→v9同式のsqrt許容に統一）
+  ③zipのMD5を記録（b907cef439015582cf51ff47ea010246、8,806.4MB）
