@@ -1714,3 +1714,17 @@ Drive MCPで取得し全採点（ランナー= scripts/_run_v11_scoring.py、出
   ②独立再検算を再実行し出力を保存（out/dataset_outdoor_siren_v11/plan/
   independent_verify_output.txt、ALL PASS。tier×warnの許容は固定±3→v9同式のsqrt許容に統一）
   ③zipのMD5を記録（b907cef439015582cf51ff47ea010246、8,806.4MB）
+
+## IS計算サーバーへの学習移行開始（2026-07-30、Colab代替）
+
+- サーバー疎通完了: 鍵認証・VS Code Remote-SSH・Slurmスモーク（ジョブ143でA100 MIG確認）
+- `~/research` をサーバーへclone済み（submodule PSELDNets=8092a14、ノートブックpinと同一）
+- **server/ フォルダ新設**（v11 Colabノートブックのサーバー移植、既存ファイル非接触）:
+  setup_env.sh（uv venv, torch 2.8.0+cu128＋ノートブック同一ピン。cu132索引は
+  torchaudio x86欠品のため不採用）/ prepare_data.py
+  （zip展開＋マニフェスト照合＋検品FAIL除外＋ckpt SHA照合）/ make_runtime_files.py
+  （configs＋空ラベルラッパ生成）/ preproc_v11.sbatch / train_v11_run2.sbatch。正= server/README.md
+- データ転送: Drive相当= `~/PSELDNets_data/`（zip4本＋ckpt をscp。展開フォルダ27GBでなく
+  zip 8.2GBを送る方式に切替）。ログ/ckpt永続化= `~/PSELDNets_logs/`
+- **計画: EXP_NAME=outdoor_siren_v11_run2**（run1=Colab T4とハイパラ同一のA100再学習
+  ＝環境間再現性チェックを兼ねる。fold3は不使用のまま）
