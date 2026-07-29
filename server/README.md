@@ -20,13 +20,15 @@ cd ~/research/PSELDNet/PSELDNets
 .venv/bin/python ~/research/outdoor_seld_e2e/server/make_runtime_files.py
 .venv/bin/python ~/research/outdoor_seld_e2e/server/prepare_data.py
 
-# 3. 前処理ジョブ（MIG 10GB で十分）
-sbatch -J v11prep -p a100_1g --gres=gpu:1g.10gb:1 --qos=low \
-    ~/research/outdoor_seld_e2e/server/preproc_v11.sbatch
-
-# 4. 学習ジョブ（A100 1枚。prep 完了を確認してから）
-sbatch -J v11run2 -p a100 --gres=gpu:a100:1 --qos=low \
+# 3+4. 前処理→学習を依存連結で一括投入（2026-07-30 run2 の実績構成）
+cd ~/research/PSELDNet/PSELDNets
+PREP=$(sbatch --parsable -J v11prep -p a100_3g --gres=gpu:3g.40gb:1 --qos=low \
+    ~/research/outdoor_seld_e2e/server/preproc_v11.sbatch)
+sbatch -J v11run2 -p pro_6000 --gres=gpu:pro_6000:1 --qos=low \
+    --dependency=afterok:$PREP \
     ~/research/outdoor_seld_e2e/server/train_v11_run2.sbatch
+# 実績: prep 1分20秒（preprocはラベルh5+index生成のみ）/ 学習 100ep=純計算23.5分
+# （中断1回→自動requeueを含め壁時計約1h）。a100 で流す場合は -p a100 --gres=gpu:a100:1
 
 # 監視
 squeue -u "$USER"
@@ -54,6 +56,13 @@ tail -f ~/v11run2-<ジョブID>.out
   当初 2.13.0+cu132 を試したが cu132 索引に torchaudio の x86 wheel が無く断念）。
   lightning==2.2.1 等の学習系ピンはノートブックと同一。run2 の位置づけは
   「環境・シード違いの頑健性チェック」なので、val 指標が run1 と大差ないことを確認する
-- **fold3（test）は絶対に触らない**（最終1回は先生と相談後。ノートブック セル13 と同じ）
+- **fold3（test）で指標を算出せず、モデル選択にも使用しない**（データとしての展開・前処理は
+  行う。最終1回の評価は先生と相談後。ノートブック セル13 と同じ）
 - 推論6セット一括（セル12 相当）は学習完了後に別途 sbatch 化する
 - Windows罠（index csv の `\` 正規化）はサーバー（Linux）では不要
+- ⚠️ **preproc のスキップ判定は index csv の存在のみ**（Colab版と同じ制約、Sol監査#3）:
+  データ・config・PSELDNets版を変えたら `_hdf5/` を手で消してから再実行すること
+- 中断時の自動再実行はクラスタ既定の requeue（利用ガイド3.3）+ `#SBATCH --requeue` 明示。
+  run2 で中断1回→自動再実行を実測済み。last.ckpt 生成後の中断なら自動 resume が効く
+- **実績と証跡**= md/results/v11run2_server_2026-07-30.md、
+  **監査対応**= md/audit/Sol自動監査01_server移行run2_2026-07-30.md
