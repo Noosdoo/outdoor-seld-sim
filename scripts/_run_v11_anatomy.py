@@ -29,6 +29,31 @@ m13.PRED = ROOT / "out" / "predictions_v11" / "val_all.csv"
 m13.FIG = ROOT / "out" / "figures_v11_analysis"
 m13.MD = ROOT / "out" / "v11_anatomy_2026-07-30.md"
 
+# step13内の固定文言(v9 run1/240本)をv11表記に差し替える(本体は無改変のまま)
+import matplotlib  # noqa: E402
+matplotlib.use("Agg")
+from matplotlib.axes import Axes  # noqa: E402
+
+_orig_set_title = Axes.set_title
+
+
+def _patched_set_title(self, label, *args, **kwargs):
+    if isinstance(label, str) and label.startswith("v9 run1"):
+        label = "v11 run1: detection rate vs frame SNR (val 1,200 clips)"
+    return _orig_set_title(self, label, *args, **kwargs)
+
+
+Axes.set_title = _patched_set_title
+
+
+def fix_md_labels() -> None:
+    text = m13.MD.read_text(encoding="utf-8")
+    text = (text
+            .replace("# v9 run1 本解剖（2026-07-17、val 240本）",
+                     "# v11 run1 本解剖（2026-07-30、val 1,200本）")
+            .replace("（240本×100フレーム中）", "（1,200本×100フレーム中）"))
+    m13.MD.write_text(text, encoding="utf-8")
+
 CLASSES_JA = ["サイレン", "クラクション", "バック音", "自転車ベル", "車", "踏切"]
 
 
@@ -73,4 +98,5 @@ def p19_table() -> None:
 
 if __name__ == "__main__":
     m13.main()
+    fix_md_labels()
     p19_table()
