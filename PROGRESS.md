@@ -1749,7 +1749,10 @@ Drive MCPで取得し全採点（ランナー= scripts/_run_v11_scoring.py、出
 - **推論6セット完了（ジョブ149, a100_3g, 数分）**: server/infer_v11_run2.sbatch（セル12移植）で
   best=epoch_094 から val/scenario/probe/scn2/v10a/halluc の6本を生成→ローカル
   **out/predictions_v11run2/** へ回収（ファイル名規約はrun1と同一、採点スクリプトがそのまま読める）。
-  残: run2予測の採点（_run_v11_scoring.py 相当をrun2向けに実行するか本人判断）
+  → **採点完了（scripts/_run_v11_run2_scoring.py 新設、出力= out/step12_notify_v11run2/）:
+  通知層レベルでもrun1とほぼ同型**（警告音97.4%/車97.3%リード4.98s/safe過剰92.4%/幻覚1/50/
+  プローブ48/48/S2は19→20/20）。弱点マップも同型=頑健性証拠を通知層へ拡張。
+  比較表の正= md/results/v11run2_server_2026-07-30.md
 - **一次記録の正= md/results/v11run2_server_2026-07-30.md**（全20回val・sacct・ckpt SHA256・
   zip MD5対照・環境凍結・空ラベル589本の内訳確定=純静穏582+safe車終始不可聴7）
 
