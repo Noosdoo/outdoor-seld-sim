@@ -1688,6 +1688,23 @@ Drive MCPで取得し全採点（ランナー= scripts/_run_v11_scoring.py、出
   P23監査済み文言=「混合音量ゲートで選別と早期性のトレードオフを確認。
   車別・因果実装の2段階通知を検証中」
 
+## PC移行の点検・復旧（2026-07-28夜、研究室新PC）
+- ✅無事: Git（WIP2コミット含め同期）・**Git管理外の全データ**（v11 7,200/eval 3,246/
+  v10 3,828のfoa・zip2本）・シミュレータ源（DynamicSoundとして存在）
+- 復旧した欠落: ①venv2つ（**DynamicSound\.venv**とPSELDNets\.venvをPython3.13で再構築。
+  割当表md5=3169fd7f一致で決定論維持を確認）②事前学習ckpt（HFから再取得、SHA256一致）
+  ③サブモジュール3つの中身（未移行だった→submodule update --init --forceで復旧、
+  PSELDNets=8092a14）④git identity（未設定→設定）⑤gitlink（旧PCローカル限定コミット
+  参照→実在コミットに更新コミット済み）
+- **残1件: GitHub認証が未設定**（非対話shellから設定不可）→本人がターミナルで
+  `git push origin main` を1回実行してブラウザ認証（ahead 1の状態）
+- 旧v1時代の実験ログ類（旧submodule内ローカルコミット同梱分）は消失、現行作業に影響なし
+- 追加復旧（migrate_backupから、別Claude差分リストに対応）: seld_move_ablationの
+  wav群・SELD-Data-Generator/source_datasets（FSD50K tsv 199＋205ファイル）・
+  clip_class_map.json・PSELDNets/datasets(outdoor1clip)・metrics.csv。
+  PSELDNets venv最終テストALL PASS（torch追加後）。発表資料フォルダはバックアップ側も
+  空＝損失なし（pptx本体はresearch外）。**C:\migrate_backup は削除せず温存**
+
 ## 外部監査用の証拠固定（2026-07-28、本人指示「ChatGPTに監査かけたい」）
 - **md/audit/v11実装まとめ_外部監査用_2026-07-28.md** 新設: 範囲と現在地・ファイルマップ・
   設計→実装の適合表・逸脱7項目・検証マトリクス・**未検証の残リスク4項目**・主要数値を集約
