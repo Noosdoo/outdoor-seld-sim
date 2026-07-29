@@ -1746,7 +1746,10 @@ Drive MCPで取得し全採点（ランナー= scripts/_run_v11_scoring.py、出
   7,199×3ダイジェスト一致・ckpt SHA256一致（すべてColabノートブックと同一の検証を通過）
 - 転送の教訓: 深夜VPNで接続リセット2回（v11_evalが中断）。大容量はzip単位＋サイズ/MD5照合が正解
   → v11_eval.zip 再送完了（サイズ一致4,011,453,596B）。README実績反映済み
-- 残: 推論6セット（セル12相当）のsbatch化
+- **推論6セット完了（ジョブ149, a100_3g, 数分）**: server/infer_v11_run2.sbatch（セル12移植）で
+  best=epoch_094 から val/scenario/probe/scn2/v10a/halluc の6本を生成→ローカル
+  **out/predictions_v11run2/** へ回収（ファイル名規約はrun1と同一、採点スクリプトがそのまま読める）。
+  残: run2予測の採点（_run_v11_scoring.py 相当をrun2向けに実行するか本人判断）
 - **一次記録の正= md/results/v11run2_server_2026-07-30.md**（全20回val・sacct・ckpt SHA256・
   zip MD5対照・環境凍結・空ラベル589本の内訳確定=純静穏582+safe車終始不可聴7）
 
