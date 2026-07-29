@@ -18,11 +18,15 @@ EXP_NAME=outdoor_siren_v11_run2
 LOGDIR="$HOME/PSELDNets_logs"
 OUTDIR="$HOME/PSELDNets_data"
 
-# best ckpt（save_top_k=1構成のためepoch_*.ckptは1本＝それがbest。Sol監査#10の前提を明示）
+# best ckpt（save_top_k=1構成のためepoch_*.ckptは1本＝それがbest。前提が崩れたら中止=fail-closed、Sol監査2-#2）
 BEST=$(ls "$LOGDIR/outdoor_siren_v11/runs/$EXP_NAME/checkpoints/"epoch_*.ckpt | sort | tail -1)
 N_CKPT=$(ls "$LOGDIR/outdoor_siren_v11/runs/$EXP_NAME/checkpoints/"epoch_*.ckpt | wc -l)
 echo "ジョブID: $SLURM_JOB_ID / ノード: $(hostname)"
-echo "best_ckpt: $BEST (epoch_*.ckpt本数=$N_CKPT、1本でなければ選定要再考)"
+echo "best_ckpt: $BEST (epoch_*.ckpt本数=$N_CKPT)"
+if [[ "$N_CKPT" -ne 1 ]]; then
+    echo "ERROR: epoch_*.ckpt が${N_CKPT}本あり、ファイル名順のbest選定は保証されない。中止"
+    exit 1
+fi
 sha256sum "$BEST"
 
 JOBS=(
