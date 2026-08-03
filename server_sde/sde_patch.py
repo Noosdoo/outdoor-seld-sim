@@ -17,10 +17,29 @@ import os
 
 import numpy as np
 
-DIST_SCALE = 0.1                      # m -> ラベル単位 (d/10)
-W_DIST = float(os.environ.get("SDE_W_DIST", "5.0"))
+DIST_SCALE = 0.1                      # linearモード時: m -> ラベル単位 (d/10)
+W_DIST = float(os.environ.get("SDE_W_DIST", "2.0"))
+# 【run3】距離スケール: log(既定)=log1p(d)/log1p(100)。遠距離の誤差を圧縮して
+# SELD本体への勾配圧迫を抑えつつ、近距離の分解能を保つ（run2の0.092劣化への対応）
+DIST_MODE = os.environ.get("SDE_DIST_MODE", "log")
+LOG_K = float(np.log1p(100.0))
 XYZ_IDX = [0, 1, 2, 4, 5, 6, 8, 9, 10]
 D_IDX = [3, 7, 11]
+
+
+def dist_encode(d):
+    """m -> ラベル単位（配列可）。"""
+    if DIST_MODE == "log":
+        return np.log1p(d) / LOG_K
+    return d * DIST_SCALE
+
+
+def dist_decode(y):
+    """ラベル単位 -> m（スカラ・非負）。"""
+    y = max(float(y), 0.0)
+    if DIST_MODE == "log":
+        return float(np.expm1(y * LOG_K))
+    return y / DIST_SCALE
 
 
 # ---------------------------------------------------------------- 共通(ローダ)
@@ -108,7 +127,7 @@ def apply_train_patches():
         se = lab[:dist.shape[0], :, 0, :]
         d_axis = np.zeros((lab.shape[0], lab.shape[1], 1, lab.shape[3]),
                           dtype=np.float32)
-        d_axis[:dist.shape[0], :, 0, :] = se * dist * DIST_SCALE
+        d_axis[:dist.shape[0], :, 0, :] = se * dist_encode(dist)
         sample["adpit_label"] = np.concatenate((lab, d_axis), axis=2)  # 5軸
         return sample
 
@@ -264,8 +283,7 @@ def apply_train_patches():
             temp.setdefault(f, []).append([
                 c, doa_pred[t, f, c], doa_pred[t, f, c + nb_classes],
                 doa_pred[t, f, c + 2 * nb_classes],
-                max(doa_pred[t, f, c + 3 * nb_classes] / DIST_SCALE,
-                    0.0)])  # dist[m]、非負ガード(監査対応v2)
+                dist_decode(doa_pred[t, f, c + 3 * nb_classes])])  # dist[m]
         for f, evs in temp.items():
             evs.sort(key=lambda x: x[0])
             outd[f] = []
