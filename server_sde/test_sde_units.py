@@ -71,7 +71,7 @@ import h5py  # noqa: E402
 from _preproc_sde import build_adpit_dist  # noqa: E402
 import utils.data_utilities as du  # noqa: E402
 
-ADPIT_H5 = sorted(Path("./").glob("**/label/adpit/train/outdoor_siren_v11.h5"))
+ADPIT_H5 = sorted(Path("./").glob("_hdf5/label/adpit/*/outdoor_siren_v11.h5"))
 META = Path("datasets/outdoor_siren_v11/metadata")
 if ADPIT_H5 and META.is_dir():
     hf = h5py.File(ADPIT_H5[0], "r")

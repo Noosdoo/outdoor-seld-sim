@@ -131,6 +131,17 @@ def apply_train_patches():
             self.fc = nn.Identity()
             log.info("[SDE] head out = classes*3*4 = %d",
                      self.num_classes * 12)
+            # 既存のload_ckptsはtscam_convを必ずスキップする(accdoa.py L198)ため、
+            # ウォームスタートのヘッドはここで自前ロードする(距離行=0の変換済ckpt)
+            init_ckpt = os.environ.get("SDE_INIT_CKPT", "")
+            if init_ckpt:
+                sd = torch.load(init_ckpt, map_location="cpu")
+                sd = sd.get("state_dict", sd)
+                sd = {k.replace("net.", "").replace("_orig_mod.", ""): v
+                      for k, v in sd.items()}
+                self.tscam_conv.weight.data.copy_(sd["tscam_conv.weight"])
+                self.tscam_conv.bias.data.copy_(sd["tscam_conv.bias"])
+                log.info("[SDE] head warm-start <- %s", init_ckpt)
 
         def forward(self, x):
             return {"multi_accdoa": super().forward(x)["accdoa"]}
