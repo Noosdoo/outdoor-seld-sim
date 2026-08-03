@@ -131,6 +131,10 @@ def apply_train_patches():
             self.fc = nn.Identity()
             log.info("[SDE] head out = classes*3*4 = %d",
                      self.num_classes * 12)
+            # 【監査対応v2】tanh天井の修正: final_actを外し、forwardでxyz行のみ
+            # tanhを掛ける（xyz挙動は従来と完全同一・距離行は線形=表現域無制限）。
+            # 旧版はDIST_SCALE=0.1でtanhにより出力可能距離が(-10m,+10m)に固定されていた
+            self.final_act = nn.Identity()
             # 既存のload_ckptsはtscam_convを必ずスキップする(accdoa.py L198)ため、
             # ウォームスタートのヘッドはここで自前ロードする(距離行=0の変換済ckpt)
             init_ckpt = os.environ.get("SDE_INIT_CKPT", "")
@@ -144,9 +148,26 @@ def apply_train_patches():
                 log.info("[SDE] head warm-start <- %s", init_ckpt)
 
         def forward(self, x):
-            return {"multi_accdoa": super().forward(x)["accdoa"]}
+            out = super().forward(x)["accdoa"]      # 生値(final_act=Identity)
+            B, T, _ = out.shape
+            o = out.reshape(B, T, 12, self.num_classes).clone()
+            o[:, :, XYZ_IDX] = torch.tanh(o[:, :, XYZ_IDX])  # xyzは従来と同一
+            # 距離行(D_IDX)は線形のまま=天井なし
+            return {"multi_accdoa": o.reshape(B, T, -1)}
 
     ma_mod.HTSAT = HTSAT_SDE
+
+    # 【監査対応v2】SDE未対応の経路を明示的に塞ぐガード
+    try:
+        import augment as aug_mod
+        for _name in ("Rotation", "TrackMix"):
+            if hasattr(aug_mod, _name):
+                def _blocked(*a, __n=_name, **kw):
+                    raise NotImplementedError(
+                        f"[SDE] augment.{__n} は5軸ラベル未対応（ガード）")
+                setattr(aug_mod, _name, _blocked)
+    except Exception:
+        pass
 
     # --- 3) 損失: xyzで置換選択 + 距離MSE(W_DIST) --------------------------
     import loss.multi_accdoa as loss_mod
@@ -220,13 +241,18 @@ def apply_train_patches():
         def merge(e0, e1):
             return [e0[0]] + [(a + b) / 2 for a, b in zip(e0[1:], e1[1:])]
 
+        def merge3(e0, e1, e2):  # 【監査対応v2】原本と同じ等重み(1/3ずつ)
+            return [e0[0]] + [(a + b + c) / 3 for a, b, c
+                              in zip(e0[1:], e1[1:], e2[1:])]
+
         temp, outd = {}, {}
         tl, fl, cl = np.where(sed_pred == 1.)
         for t, f, c in zip(tl, fl, cl):
             temp.setdefault(f, []).append([
                 c, doa_pred[t, f, c], doa_pred[t, f, c + nb_classes],
                 doa_pred[t, f, c + 2 * nb_classes],
-                doa_pred[t, f, c + 3 * nb_classes] / DIST_SCALE])  # dist[m]
+                max(doa_pred[t, f, c + 3 * nb_classes] / DIST_SCALE,
+                    0.0)])  # dist[m]、非負ガード(監査対応v2)
         for f, evs in temp.items():
             evs.sort(key=lambda x: x[0])
             outd[f] = []
@@ -249,15 +275,18 @@ def apply_train_patches():
                         if s == 0:
                             outd[f] += [grp[0], grp[1], grp[2]]
                         elif s == 1:
+                            # 【監査対応v2】f02分岐は原本(data_utilities.py)と
+                            # ビット互換にする（原本はgrp[1]を捨てgrp[0]を二重計上
+                            # する挙動。上流バグだが、run2との比較可能性を優先して
+                            # 同一挙動に合わせる。別途上流に報告対象）
                             if f01:
                                 outd[f] += [merge(grp[0], grp[1]), grp[2]]
                             elif f12:
                                 outd[f] += [grp[0], merge(grp[1], grp[2])]
                             else:
-                                outd[f] += [grp[1], merge(grp[0], grp[2])]
+                                outd[f] += [grp[0], merge(grp[0], grp[2])]
                         else:
-                            outd[f].append(
-                                merge(merge(grp[0], grp[1]), grp[2]))
+                            outd[f].append(merge3(grp[0], grp[1], grp[2]))
                     grp = []
         return outd
 
@@ -274,11 +303,14 @@ def apply_train_patches():
         return out
 
     def write_output_format_file_sde(path, out_dict):
+        # 【監査対応v2】dist付きは6列 [frame,class,track=0,az,el,dist] で書く。
+        # 旧5列だと自前ローダのlen==5分岐([frame,class,track,az,el])に化けて
+        # az←el, el←dist と誤読される往復事故があった
         with open(path, "w") as fid:
             for f in out_dict.keys():
                 for v in out_dict[f]:
-                    if len(v) > 3:   # dist付き: 5列 [frame,class,az,el,dist]
-                        fid.write(f"{int(f)},{int(v[0])},{int(v[1])},"
+                    if len(v) > 3:
+                        fid.write(f"{int(f)},{int(v[0])},0,{int(v[1])},"
                                   f"{int(v[2])},{float(v[3]):.2f}\n")
                     else:
                         fid.write(f"{int(f)},{int(v[0])},{int(v[1])},"

@@ -72,22 +72,24 @@ from _preproc_sde import build_adpit_dist  # noqa: E402
 import utils.data_utilities as du  # noqa: E402
 
 ADPIT_H5 = sorted(Path("./").glob("_hdf5/label/adpit/*/outdoor_siren_v11.h5"))
-META = Path("datasets/outdoor_siren_v11/metadata")
-if ADPIT_H5 and META.is_dir():
-    hf = h5py.File(ADPIT_H5[0], "r")
-    n_ok = 0
-    for meta_file in sorted(META.glob("*.csv"))[:200]:
-        fn = meta_file.stem
-        desc = du.load_output_format_file(meta_file)   # 5列(dist無し)でもOK
-        se, azi, ele, _ = build_adpit_dist(desc, 6)
-        g = hf[fn]["adpit"]
-        assert np.array_equal(se, g["se"][:len(se)]), fn
-        assert np.array_equal(azi, g["azi"][:len(azi)]), fn
-        assert np.array_equal(ele, g["ele"][:len(ele)]), fn
-        n_ok += 1
-    hf.close()
-    print(f"T2 抽出等価(既存h5と照合): PASS ({n_ok}本)")
-else:
-    print("T2 SKIP: 既存adpit h5またはmetadataが見つからない(パスを確認)")
+META = Path("datasets/outdoor_siren_v11/metadata_dist")  # 本番の6列パス(監査対応v2)
+assert ADPIT_H5 and META.is_dir(), \
+    "T2の前提が無い(既存adpit h5 / metadata_dist)。SKIPは許さずFAILとする(監査対応v2)"
+hf = h5py.File(ADPIT_H5[0], "r")
+n_ok, n_dist_rows = 0, 0
+for meta_file in sorted(META.glob("*.csv"))[:200]:
+    fn = meta_file.stem
+    desc = du.load_output_format_file(meta_file)       # 6列: distを保持
+    se, azi, ele, dist = build_adpit_dist(desc, 6)
+    g = hf[fn]["adpit"]
+    assert np.array_equal(se, g["se"][:len(se)]), fn
+    assert np.array_equal(azi, g["azi"][:len(azi)]), fn
+    assert np.array_equal(ele, g["ele"][:len(ele)]), fn
+    n_dist_rows += int((dist > 0).sum())
+    n_ok += 1
+hf.close()
+assert n_dist_rows > 0, "T2: 6列metadata_distからdistが1つも取れていない"
+print(f"T2 抽出等価(本番6列パス・既存h5と照合): PASS ({n_ok}本, "
+      f"dist>0要素 {n_dist_rows:,})")
 
 print("ALL UNIT TESTS DONE")

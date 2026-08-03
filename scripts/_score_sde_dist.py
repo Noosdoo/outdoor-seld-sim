@@ -47,12 +47,17 @@ def circ_diff(a, b):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     # 予測読み込み: pred[clip][(frame,class)] = [(az,dist),...]
+    # 7列 [clip,frame,class,track,az,el,dist]（監査対応v2の新形式）と
+    # 旧6列 [clip,frame,class,az,el,dist] の両対応
     pred = defaultdict(lambda: defaultdict(list))
     for line in open(PRED, encoding="utf-8"):
         p = line.strip().split(",")
-        if len(p) < 6:
-            continue
-        pred[p[0]][(int(p[1]), int(p[2]))].append((float(p[3]), float(p[5])))
+        if len(p) >= 7:
+            pred[p[0]][(int(p[1]), int(p[2]))].append(
+                (float(p[4]), float(p[6])))
+        elif len(p) == 6:
+            pred[p[0]][(int(p[1]), int(p[2]))].append(
+                (float(p[3]), float(p[5])))
 
     pairs = []          # (class, gt_dist, pred_dist)
     n_gt = n_paired = 0
@@ -81,11 +86,12 @@ def main():
     cls, gd, pd_ = arr[:, 0].astype(int), arr[:, 1], arr[:, 2]
     err = np.abs(pd_ - gd)
 
-    R = ["# SDE距離推定の初採点（val 1,200本、SDE run1 ep094）", "",
+    R = ["# SDE距離推定の採点（val 1,200本）", "",
          f"- GTフレーム対 {n_gt:,} / ペア成立 {n_paired:,} "
          f"({100*n_paired/max(n_gt,1):.1f}%)",
          f"- **距離MAE {err.mean():.2f}m / 中央絶対誤差 {np.median(err):.2f}m**"
-         f"（全クラス、距離レンジ0.6〜44m）", "", "## クラス別",
+         f"（全クラス、GT距離実測レンジ {gd.min():.2f}〜{gd.max():.2f}m）",
+         "", "## クラス別",
          "| クラス | n | MAE | 中央 |", "| --- | --- | --- | --- |"]
     for ci in range(6):
         m = cls == ci
@@ -103,12 +109,16 @@ def main():
             R.append(f"| {lo:g}〜{hi:g}m | {m.sum():,} | {err[m].mean():.2f}m "
                      f"| {np.median(err[m]):.2f}m |")
 
-    # 3段仕分け(役割③の本題)
+    # 3段仕分け(役割③の本題)。帰無基準線を併記（監査対応v2:
+    # 「安全」が支配的なため全体一致率は帰無と差が出にくい→tier別再現率を主に読む）
     gt_t = np.array([tier(v) for v in gd[car]])
     pd_t = np.array([tier(v) for v in pd_[car]])
     agree = (gt_t == pd_t).mean()
-    R += ["", "## 車の3段仕分け一致率（役割③の主指標）",
-          f"- 全車フレーム: **{100*agree:.1f}%**"]
+    null_agree = max((gt_t == t).mean() for t in ("重大", "注意", "安全"))
+    R += ["", "## 車の3段仕分け（役割③）",
+          f"- 全車フレーム一致率: {100*agree:.1f}% "
+          f"（帰無=常に最頻tier: {100*null_agree:.1f}% → 上積み"
+          f"+{100*(agree-null_agree):.1f}pt。**主指標はtier別再現率**）"]
     for t in ("重大", "注意", "安全"):
         m = gt_t == t
         if m.sum():
@@ -116,8 +126,10 @@ def main():
             R.append(f"- GT={t} ({m.sum():,}fr): 正しく{t}と判定 "
                      f"{100*recall:.1f}%")
     near = car & (gd <= 5.0)
+    const_near = np.abs(np.median(gd[near]) - gd[near])  # 最良定数の帰無
     R += ["", f"## 至近側（GT≤5m、役割③の作動域）: n={near.sum():,} / "
-          f"MAE {err[near].mean():.2f}m / 中央 {np.median(err[near]):.2f}m"]
+          f"MAE {err[near].mean():.2f}m / 中央 {np.median(err[near]):.2f}m "
+          f"（帰無=最良定数予測のMAE {const_near.mean():.2f}m）"]
 
     (OUT / "dist_score.md").write_text("\n".join(R) + "\n", encoding="utf-8")
     print("\n".join(R))
