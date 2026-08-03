@@ -39,7 +39,7 @@ _orig_set_title = Axes.set_title
 
 def _patched_set_title(self, label, *args, **kwargs):
     if isinstance(label, str) and label.startswith("v9 run1"):
-        label = "v11 run1: detection rate vs frame SNR (val 1,200 clips)"
+        label = "背景騒音に対する音源別検出率（検証データ1,200本）"
     return _orig_set_title(self, label, *args, **kwargs)
 
 

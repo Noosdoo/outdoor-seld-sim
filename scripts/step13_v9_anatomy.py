@@ -30,7 +30,7 @@ PRED = ROOT / "out" / f"predictions_v9{_SUF}" / "val_all.csv"
 FIG = ROOT / "out" / f"figures_v9{_SUF}_analysis"
 MD = ROOT / "out" / f"v9{_SUF}_anatomy_2026-07-17.md"
 
-CLASSES = ["Siren", "Horn", "BackupBeep", "BikeBell", "CarDrive", "Crossing"]
+CLASSES = ["サイレン", "クラクション", "バック警告音", "自転車ベル", "車の走行音", "踏切警報音"]
 CAR = 4
 # Okabe-Ito（CVD対応、検証済み。曲線は右端に直接ラベル=二次符号化）
 COLORS = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#56B4E9", "#D55E00"]
@@ -143,6 +143,14 @@ def main():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["font.sans-serif"] = [
+        "Yu Gothic",
+        "Meiryo",
+        "MS Gothic",
+        "DejaVu Sans",
+    ]
+    plt.rcParams["axes.unicode_minus"] = False
     fig, ax = plt.subplots(figsize=(8.6, 5.2))
     centers = [(SNR_EDGES[i] + SNR_EDGES[i + 1]) / 2 for i in range(len(SNR_EDGES) - 1)]
     centers[0], centers[-1] = -12.5, 12.5   # 開区間の代表点は端に寄せる
@@ -169,10 +177,10 @@ def main():
                     arrowprops=dict(arrowstyle="-", color=COLORS[c],
                                     lw=0.8, alpha=0.6))
     ax.axvline(0.0, color="0.55", ls=":", lw=1.5)
-    ax.annotate("audibility gate (0 dB)", (0, 0.05), xytext=(6, 0),
+    ax.annotate("背景雑音 (0 dB)", (0, 0.05), xytext=(6, 0),
                 textcoords="offset points", color="0.4", fontsize=9)
-    ax.set_xlabel("Frame A-weighted SNR vs background noise [dB]")
-    ax.set_ylabel("Detection rate")
+    ax.set_xlabel("対象音と背景騒音の音量差［dB］")
+    ax.set_ylabel("検出率")
     ax.set_ylim(-0.02, 1.05)
     ax.set_xlim(-16, 19)
     ax.grid(alpha=0.25)
