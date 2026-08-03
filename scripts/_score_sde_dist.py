@@ -21,9 +21,12 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-PRED = ROOT / "out" / "predictions_v11sde" / "val_all.csv"
+# 引数で予測CSVと出力先を指定可（既定=run1のまま。新しいランは新フォルダに出す=上書き禁止運用）
+PRED = Path(sys.argv[1]) if len(sys.argv) > 1 else \
+    ROOT / "out" / "predictions_v11sde" / "val_all.csv"
 META = ROOT / "out" / "dataset_outdoor_siren_v11" / "metadata_dist"
-OUT = ROOT / "out" / "step12_notify_v11sde"
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else \
+    ROOT / "out" / "step12_notify_v11sde"
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

@@ -37,8 +37,11 @@ m12 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m12)
 
 DS = ROOT / "out" / "dataset_outdoor_siren_v11"
-PRED = ROOT / "out" / "predictions_v11sde" / "val_all.csv"
-OUT = ROOT / "out" / "step12_notify_v11sde"
+# 引数で予測CSVと出力先を指定可（既定=run1のまま。新しいランは新フォルダに出す=上書き禁止運用）
+PRED = Path(sys.argv[1]) if len(sys.argv) > 1 else \
+    ROOT / "out" / "predictions_v11sde" / "val_all.csv"
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else \
+    ROOT / "out" / "step12_notify_v11sde"
 CAR = 4
 AZ_MATCH = 25.0          # 帰属・距離窓の方位マッチ幅[deg]
 T3, T2, SUPP = 1.5, 3.0, 3.2
