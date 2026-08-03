@@ -157,15 +157,28 @@ def apply_train_patches():
 
     ma_mod.HTSAT = HTSAT_SDE
 
-    # 【監査対応v2】SDE未対応の経路を明示的に塞ぐガード
+    # 【監査対応v2.1】SDE未対応の経路を塞ぐガード。
+    # 注意: hydraはaugment.type=[]でも設定ツリー上のオブジェクトを生成するため、
+    # 生成(__init__)は許し「実際に使われた瞬間」だけ例外にする
+    # （v2はここで生成時に例外を投げてジョブ194が起動7秒で死んだ。教訓）
     try:
         import augment as aug_mod
+
+        def _make_blocked(name):
+            class _BlockedAug:
+                def __init__(self, *a, **kw):
+                    pass
+
+                def __call__(self, *a, **kw):
+                    raise NotImplementedError(
+                        f"[SDE] augment.{name} は5軸ラベル未対応（ガード）")
+
+            _BlockedAug.__name__ = f"Blocked{name}"
+            return _BlockedAug
+
         for _name in ("Rotation", "TrackMix"):
             if hasattr(aug_mod, _name):
-                def _blocked(*a, __n=_name, **kw):
-                    raise NotImplementedError(
-                        f"[SDE] augment.{__n} は5軸ラベル未対応（ガード）")
-                setattr(aug_mod, _name, _blocked)
+                setattr(aug_mod, _name, _make_blocked(_name))
     except Exception:
         pass
 
