@@ -23,8 +23,10 @@ from outdoor_seld.calibration import a_weighted_rms  # noqa: E402
 from outdoor_seld.engine import make_car_v9  # noqa: E402
 from outdoor_seld.engine_ev import make_car_ev  # noqa: E402
 from outdoor_seld.engine_heavy import make_heavy_delta  # noqa: E402
+from outdoor_seld.kickboard import make_kickboard  # noqa: E402
 from outdoor_seld.noise import colored_noise  # noqa: E402
 from outdoor_seld.noise_v12 import urban_colored_noise  # noqa: E402
+from outdoor_seld.train import make_train_passby  # noqa: E402
 
 FS = 48000
 DUR = 8.0
@@ -54,9 +56,13 @@ def main() -> None:
     g = np.sqrt(max(0.0, b1k * 10 ** 0.3 - b63) / band_energy(d, FS, 44.0, 88.0))
     heavy = car + g * d
 
+    train = make_train_passby(DUR, FS, np.random.default_rng(14), speed_mps=20.0)
+    kick = make_kickboard(DUR, FS, np.random.default_rng(15), speed_mps=4.0)
+
     files = [("01_背景_v11ピンク.wav", pink), ("02_背景_v12都市_63Hz峰.wav", urban),
              ("03_車_v11現行.wav", car), ("04_車_v12静音EV.wav", ev),
-             ("05_車_v12大型_低音強化.wav", heavy)]
+             ("05_車_v12大型_低音強化.wav", heavy),
+             ("06_列車_v12_72kmh.wav", train), ("07_キックボード_v12_14kmh.wav", kick)]
     # A特性レベルを全ファイルで統一 → 共通ゲインでピーク安全化（相対関係は保持）
     target = a_weighted_rms(car, FS)
     scaled = [(nm, x * (target / a_weighted_rms(x, FS))) for nm, x in files]
@@ -76,7 +82,11 @@ def main() -> None:
         "  聞こえの大きさは同じで低音だけ増える統制）。ヘッドホンでどうぞ\n\n"
         "判定してほしいこと: ①02は01より「街の暗騒音」らしいか\n"
         "②04はEVらしいか（不自然な電子音になっていないか）\n"
-        "③05は03より大型車らしいか\n", encoding="utf-8")
+        "③05は03より大型車らしいか\n"
+        "・06: 在来線列車72km/h（転動音500-2kHz＋低域＋「ガタンゴトン」1秒周期。\n"
+        "  第4種踏切シナリオ用）。列車らしいか\n"
+        "・07: 電動キックボード14km/h（小径タイヤの転がり音＋モータ音1.6kHz）。\n"
+        "  「静かだが確かに何か来る」感が出ているか\n", encoding="utf-8")
     print("\n->", OUT)
 
 
