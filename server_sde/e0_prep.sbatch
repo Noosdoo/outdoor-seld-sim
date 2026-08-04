@@ -11,9 +11,9 @@ cd ~/research/PSELDNet/PSELDNets
 # ① HPFレンダ（元データ不変更・派生3フォルダ新規作成）
 .venv/bin/python _e0_hpf_render.py --src datasets/outdoor_siren_v11 --cutoffs 50 100 200
 
-# ② 各派生を extract_data（v11本体の前処理と同じ流儀。dataset名=フォルダ名）
+# ② 各派生を extract_data（dataset名=フォルダ名。Synthesisクラスの汎用マッピングで解決）
 for fc in 50 100 200; do
-  .venv/bin/python src/preprocess.py \
+  .venv/bin/python src/preproc.py \
     dataset=outdoor_siren_v11_hpf${fc} dataset_type=dev \
     wav_format=.flac mode=extract_data num_workers=8
 done
