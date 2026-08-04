@@ -46,8 +46,8 @@ def _band_noise(n: int, fs: int, rng: np.random.Generator,
 
 def make_train_passby(duration_sec: float, fs: int, rng: np.random.Generator,
                       speed_mps: float = 20.0,
-                      rolling_frac_a: float = 0.70, low_frac_a: float = 0.15,
-                      joint_frac_a: float = 0.15, peak: float = 0.9) -> np.ndarray:
+                      rolling_frac_a: float = 0.55, low_frac_a: float = 0.15,
+                      joint_frac_a: float = 0.30, peak: float = 0.9) -> np.ndarray:
     """在来線列車の走行音（ドライ音源。移動・距離減衰はレンダラー側）。
 
     Args:
@@ -62,18 +62,21 @@ def make_train_passby(duration_sec: float, fs: int, rng: np.random.Generator,
     dt_axle = BOGIE_AXLE_SPACING_M / speed_mps   # 2連打の間隔
     env = np.zeros(n)
     t = rng.uniform(0.0, t_car)              # 位相はクリップ毎に乱数
-    decay = int(0.03 * fs)                   # 打撃の減衰30ms
-    kernel = np.exp(-np.arange(decay) / (0.008 * fs))
+    decay = int(0.08 * fs)                   # 打撃の減衰80ms（余韻を長く）
+    kernel = np.exp(-np.arange(decay) / (0.018 * fs))
     while t < duration_sec:
-        for off in (0.0, dt_axle,            # 前台車の2連打
-                    t_car * 0.55, t_car * 0.55 + dt_axle):   # 後台車（車両後方）
+        # 「ガタン(強)・ゴトン(やや弱)」= 前台車1.0/後台車0.75のアクセント
+        for off, acc in ((0.0, 1.0), (dt_axle, 0.9),
+                         (t_car * 0.55, 0.75), (t_car * 0.55 + dt_axle, 0.7)):
             i = int((t + off) * fs)
             if 0 <= i < n:
-                amp = 1.0 + 0.3 * rng.standard_normal()
+                amp = acc * (1.0 + 0.25 * rng.standard_normal())
                 j = min(decay, n - i)
                 env[i:i + j] += max(amp, 0.2) * kernel[:j]
         t += t_car
-    joint_click = _band_noise(n, fs, rng, 200.0, 4000.0) * env
+    # 打撃=中高域クリック＋低域の「ドスン」（車体・軌道の低次モード励振）
+    joint_click = (_band_noise(n, fs, rng, 200.0, 3000.0) * env
+                   + 1.5 * _band_noise(n, fs, rng, 60.0, 250.0) * env)
     ra = a_weighted_rms(joint_click, fs)
     joint_click = joint_click / ra if ra > 0 else joint_click
 
