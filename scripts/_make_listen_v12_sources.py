@@ -26,7 +26,7 @@ from outdoor_seld.engine_heavy import make_heavy_delta  # noqa: E402
 from outdoor_seld.kickboard import make_kickboard  # noqa: E402
 from outdoor_seld.noise import colored_noise  # noqa: E402
 from outdoor_seld.noise_v12 import urban_colored_noise  # noqa: E402
-from outdoor_seld.train import make_train_composite  # noqa: E402
+from outdoor_seld.train import make_train_composite, make_train_horn  # noqa: E402
 
 FS = 48000
 DUR = 8.0
@@ -60,10 +60,23 @@ def main() -> None:
                                  speed_mps=20.0, n_cars=6)[: int(DUR * FS)]
     kick = make_kickboard(DUR, FS, np.random.default_rng(15), speed_mps=4.0)
 
+    # 警笛: 長緩一声(1.6s) と 短急数声(0.4s×3) を1本のデモにまとめる
+    def horn_demo(horn_type, seed):
+        r = np.random.default_rng(seed)
+        one = make_train_horn(1.6, FS, r, horn_type=horn_type)
+        gap = np.zeros(int(0.8 * FS))
+        shorts = []
+        for _ in range(3):
+            shorts += [make_train_horn(0.4, FS, r, horn_type=horn_type),
+                       np.zeros(int(0.25 * FS))]
+        return np.concatenate([one, gap] + shorts)
+
     files = [("01_背景_v11ピンク.wav", pink), ("02_背景_v12都市_63Hz峰.wav", urban),
              ("03_車_v11現行.wav", car), ("04_車_v12静音EV.wav", ev),
              ("05_車_v12大型_低音強化.wav", heavy),
-             ("06_列車_v12_72kmh.wav", train), ("07_キックボード_v12_14kmh.wav", kick)]
+             ("06_列車_v12_72kmh.wav", train), ("07_キックボード_v12_14kmh.wav", kick),
+             ("08_列車警笛_空気笛.wav", horn_demo("air", 16)),
+             ("09_列車警笛_電子ホーン.wav", horn_demo("electric", 17))]
     # A特性レベルを全ファイルで統一 → 共通ゲインでピーク安全化（相対関係は保持）
     target = a_weighted_rms(car, FS)
     scaled = [(nm, x * (target / a_weighted_rms(x, FS))) for nm, x in files]
