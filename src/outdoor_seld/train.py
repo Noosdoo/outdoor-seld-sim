@@ -20,10 +20,17 @@
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from .calibration import a_weighted_rms
 from .noise import colored_noise
+
+# 実録参照からの高解像度フィット（scripts/_fit_train_ref.py が生成、2026-08-05）
+_REF = json.loads((Path(__file__).parent / "train_ref_params.json")
+                  .read_text(encoding="utf-8"))
 
 RAIL_LEN_M = 25.0
 CAR_LEN_M = 20.0
@@ -59,7 +66,9 @@ def make_train_passby(duration_sec: float, fs: int, rng: np.random.Generator,
                       peak: float = 0.9) -> np.ndarray:
     """1車両ぶんの走行音（本番は車両毎に本関数を1音源として並べる）。"""
     n = int(round(duration_sec * fs))
-    body = _shaped_noise(n, fs, rng, TRAIN_ANCHORS_HZ, TRAIN_ANCHORS_DB)
+    body = _shaped_noise(n, fs, rng,
+                         np.array(_REF["body_env"]["freqs"], float),
+                         np.array(_REF["body_env"]["db"], float))
 
     # 継目打撃: 軸位置の実幾何から発生時刻を導出（実録の連打0.05-0.15s/クラスタ0.6-0.7sと整合）
     dt_axle = BOGIE_AXLE_SPACING_M / speed_mps
@@ -69,8 +78,9 @@ def make_train_passby(duration_sec: float, fs: int, rng: np.random.Generator,
                              CAR_LEN_M - BOGIE_FROM_END_M + dt_axle * speed_mps / 2.0])
     t_rail = RAIL_LEN_M / speed_mps
     env = np.zeros(n)
-    decay = int(0.08 * fs)
-    kernel = np.exp(-np.arange(decay) / (0.018 * fs))
+    tau = float(_REF["impact"]["tau_s"])     # 実測減衰 0.213s（フィット値）
+    decay = int(3.0 * tau * fs)
+    kernel = np.exp(-np.arange(decay) / (tau * fs))
     t = rng.uniform(0.0, t_rail)
     while t < duration_sec:
         for k, off_m in enumerate(axle_offsets):
@@ -81,8 +91,9 @@ def make_train_passby(duration_sec: float, fs: int, rng: np.random.Generator,
                 j = min(decay, n - i)
                 env[i:i + j] += max(amp, 0.2) * kernel[:j]
         t += t_rail
-    click = (_shaped_noise(n, fs, rng, np.array([63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0]),
-                           np.array([-6.0, 0.0, -1.0, -3.0, -6.0, -10.0])) * env)
+    click = (_shaped_noise(n, fs, rng,
+                           np.array(_REF["impact"]["freqs"], float),
+                           np.array(_REF["impact"]["db"], float)) * env)
     rc = a_weighted_rms(click, fs)
     click = click / rc if rc > 0 else click
 
@@ -125,23 +136,21 @@ def make_train_horn(duration_sec: float, fs: int, rng: np.random.Generator,
     吹鳴パターン（長緩一声・短急数声）は呼び出し側がこの1声を並べて作る。
     """
     n = int(round(duration_sec * fs))
-    f0 = float(rng.uniform(300.0, 325.0)) if horn_type == "air" \
-        else float(rng.uniform(295.0, 305.0))
-    if horn_type == "air":
-        harmonics = [(1, 1.0), (2, 0.9), (3, 0.7), (4, 0.5), (5, 0.35), (6, 0.25)]
-    else:
-        harmonics = [(1, 0.15), (2, 0.2), (3, 0.7), (4, 1.0), (5, 0.9),
-                     (6, 0.8), (8, 0.6)]
+    ref = _REF["horn_air" if horn_type == "air" else "horn_electric"]
+    detune = float(rng.uniform(0.98, 1.02))   # 個体差（部分音の相対構造は実測のまま）
     jitter = colored_noise(n, fs, rng, slope=2.5, f_lo=0.3)
     x = np.zeros(n)
-    for k, amp in harmonics:
-        phase = 2.0 * np.pi * np.cumsum(k * f0 * (1.0 + 0.003 * jitter)) / fs
-        x += amp * np.sin(phase)
-    # エンベロープ: 立ち上がり30ms・リリース80ms
-    env = np.ones(n)
-    a, r = int(0.03 * fs), int(0.08 * fs)
-    env[:a] = np.linspace(0.0, 1.0, a)
-    env[-r:] = np.linspace(1.0, 0.0, r)
+    for p in ref["partials"]:
+        phase = (2.0 * np.pi * np.cumsum(
+            p["hz"] * detune * (1.0 + 0.002 * jitter)) / fs
+            + rng.uniform(0.0, 2.0 * np.pi))
+        x += float(p["amp"]) * np.sin(phase)
+    # 実測の振幅エンベロープ概形（20分割）を時間伸縮して適用＋端の立上り/立下り
+    env = np.interp(np.linspace(0, 1, n), np.linspace(0, 1, 20),
+                    np.array(ref["env20"], float))
+    a, r = int(0.02 * fs), int(0.06 * fs)
+    env[:a] *= np.linspace(0.0, 1.0, a)
+    env[-r:] *= np.linspace(1.0, 0.0, r)
     x = x * env
     peak_val = float(np.max(np.abs(x)))
     return peak * x / peak_val if peak_val > 0 else x
