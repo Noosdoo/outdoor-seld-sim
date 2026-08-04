@@ -61,19 +61,30 @@ def make_train_passby(duration_sec: float, fs: int, rng: np.random.Generator,
     t_car = CAR_LEN_M / speed_mps            # 1車両が通過する周期
     dt_axle = BOGIE_AXLE_SPACING_M / speed_mps   # 2連打の間隔
     env = np.zeros(n)
-    t = rng.uniform(0.0, t_car)              # 位相はクリップ毎に乱数
-    decay = int(0.08 * fs)                   # 打撃の減衰80ms（余韻を長く）
+    # 軸位置の実幾何からリズムを作る（本人指摘2026-08-05: 均等割りはリズムが違う）
+    # 車両20m・台車中心は車端から約3m・台車内軸距2.1m
+    #   → 1両の軸位置: 3∓1.05m, 17∓1.05m
+    #   → 隣接車両間では「後台車(17m)と次車前台車(23m)」が6m差で近接
+    #   → 「タタン…タタン」のクラスタが濃淡を持って続く実物のリズムになる
+    bogie_from_end = 3.0
+    axle_offsets = np.array([bogie_from_end - dt_axle * speed_mps / 2.0,
+                             bogie_from_end + dt_axle * speed_mps / 2.0,
+                             CAR_LEN_M - bogie_from_end - dt_axle * speed_mps / 2.0,
+                             CAR_LEN_M - bogie_from_end + dt_axle * speed_mps / 2.0])
+    t_rail = RAIL_LEN_M / speed_mps          # 各車両は25m毎にジョイントを踏む
+    decay = int(0.08 * fs)
     kernel = np.exp(-np.arange(decay) / (0.018 * fs))
+    t0 = rng.uniform(0.0, t_rail)            # 位相はクリップ毎に乱数
+    t = t0
     while t < duration_sec:
-        # 「ガタン(強)・ゴトン(やや弱)」= 前台車1.0/後台車0.75のアクセント
-        for off, acc in ((0.0, 1.0), (dt_axle, 0.9),
-                         (t_car * 0.55, 0.75), (t_car * 0.55 + dt_axle, 0.7)):
-            i = int((t + off) * fs)
+        for k, off_m in enumerate(axle_offsets):
+            i = int((t + off_m / speed_mps) * fs)
+            acc = 1.0 if k < 2 else 0.8      # 前台車やや強のアクセント
             if 0 <= i < n:
                 amp = acc * (1.0 + 0.25 * rng.standard_normal())
                 j = min(decay, n - i)
                 env[i:i + j] += max(amp, 0.2) * kernel[:j]
-        t += t_car
+        t += t_rail
     # 打撃=中高域クリック＋低域の「ドスン」（車体・軌道の低次モード励振）
     joint_click = (_band_noise(n, fs, rng, 200.0, 3000.0) * env
                    + 1.5 * _band_noise(n, fs, rng, 60.0, 250.0) * env)
@@ -86,6 +97,29 @@ def make_train_passby(duration_sec: float, fs: int, rng: np.random.Generator,
                        else joint_click, joint_frac_a)):
         r = a_weighted_rms(sig, fs)
         x = x + (np.sqrt(frac) / r) * sig
+    peak_val = float(np.max(np.abs(x)))
+    return peak * x / peak_val if peak_val > 0 else x
+
+
+def make_train_composite(duration_sec: float, fs: int, rng: np.random.Generator,
+                         speed_mps: float = 20.0, n_cars: int = 6,
+                         peak: float = 0.9) -> np.ndarray:
+    """編成合成（試聴・検品用）: n_cars両ぶんの音を物理的な位相結合で重ねる。
+
+    各車両は同一ジョイントを (車両長/速度) ずつ遅れて踏む——この位相結合で
+    実物の「タタン…タタン」の濃淡あるリズムが自動的に生じる。
+    本番レンダでは各車両を独立の点音源として配置する（v12設計書の列車規約）ため、
+    この関数はドライ試聴と検品専用。
+    """
+    n = int(round(duration_sec * fs))
+    dt_car = CAR_LEN_M / speed_mps
+    x = np.zeros(n)
+    for i in range(n_cars):
+        car = make_train_passby(duration_sec + dt_car * n_cars, fs,
+                                np.random.default_rng(rng.integers(2 ** 31) + i),
+                                speed_mps=speed_mps, peak=1.0)
+        s = int(i * dt_car * fs)
+        x += car[s:s + n] * (1.0 if i > 0 else 1.0)
     peak_val = float(np.max(np.abs(x)))
     return peak * x / peak_val if peak_val > 0 else x
 

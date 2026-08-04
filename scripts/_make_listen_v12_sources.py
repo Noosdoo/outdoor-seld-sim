@@ -26,7 +26,7 @@ from outdoor_seld.engine_heavy import make_heavy_delta  # noqa: E402
 from outdoor_seld.kickboard import make_kickboard  # noqa: E402
 from outdoor_seld.noise import colored_noise  # noqa: E402
 from outdoor_seld.noise_v12 import urban_colored_noise  # noqa: E402
-from outdoor_seld.train import make_train_passby  # noqa: E402
+from outdoor_seld.train import make_train_composite  # noqa: E402
 
 FS = 48000
 DUR = 8.0
@@ -56,7 +56,8 @@ def main() -> None:
     g = np.sqrt(max(0.0, b1k * 10 ** 0.3 - b63) / band_energy(d, FS, 44.0, 88.0))
     heavy = car + g * d
 
-    train = make_train_passby(DUR, FS, np.random.default_rng(14), speed_mps=20.0)
+    train = make_train_composite(12.0, FS, np.random.default_rng(14),
+                                 speed_mps=20.0, n_cars=6)[: int(DUR * FS)]
     kick = make_kickboard(DUR, FS, np.random.default_rng(15), speed_mps=4.0)
 
     files = [("01_背景_v11ピンク.wav", pink), ("02_背景_v12都市_63Hz峰.wav", urban),
