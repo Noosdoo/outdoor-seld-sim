@@ -42,6 +42,16 @@ m9.WORK = m9.DS / "work"
 # ---- ①背景騒音の差替（呼び出し規約・RNG消費構造は同一） --------------------
 m9.diffuse_foa_noise = diffuse_foa_urban_noise
 
+# ---- v12デジタルヘッドルーム規約: 全信号一律 -6dB -------------------------------
+# 根拠: 都市背景はdB(A)等価でもピンクより低域の物理振幅が大きく、騒音上限付近の
+# クリップでピークが0.99を超えた（job248 shard4: mix3642 peak1.248）。全音源・背景を
+# 一律-6dBすることで相対関係（SNR・クラス間レベル・ラベル・マスク）は完全に不変のまま
+# クリッピングだけを回避する。記録されるrecv_*_db等の絶対値も-6dBシフトする（規約）。
+V12_HEADROOM_DB = 6.0
+_orig_gain_for_spl_a = m9.gain_for_spl_a
+m9.gain_for_spl_a = (lambda x, fs, db:
+                     _orig_gain_for_spl_a(x, fs, db - V12_HEADROOM_DB))
+
 # ---- ②車のバリアント振り分け（audio_seed決定論、車単位） --------------------
 EV_FRAC = 0.15
 HEAVY_FRAC = 0.30       # EVでない車のうちではなく全車比（0.15<=u<0.45が大型）
