@@ -16,10 +16,18 @@
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from .calibration import a_weighted_rms
 from .noise import colored_noise
+
+# 実録参照（soundeffect-lab バイク通過1/3）からフィットした1/6oct包絡51点
+# （2026-08-05。二輪=125-250Hz峰・500Hz以上急峻ロールオフ / 原付=500-1k峰の甲高系）
+_BREF = json.loads((Path(__file__).parent / "bike_ref_params.json")
+                   .read_text(encoding="utf-8"))
 
 
 def _pulse_train(n: int, fs: int, f_inst: np.ndarray, duty: float,
@@ -41,37 +49,34 @@ def make_motorcycle(duration_sec: float, fs: int, rng: np.random.Generator,
                     mech_frac_a: float = 0.10, peak: float = 0.9) -> np.ndarray:
     """バイク走行音（ドライ）。engine_class: "moped"(原付) | "motorcycle"(軽/小型二輪)。"""
     n = int(round(duration_sec * fs))
-    # 発火周波数: 原付=50〜75Hz（高回転小単気筒）/ 二輪=35〜55Hz（太め）
-    lo, hi = (50.0, 75.0) if engine_class == "moped" else (35.0, 55.0)
+    # 発火周波数（実録参照の推定に合わせ調整）: 原付=85〜120Hz（高回転・甲高い）/
+    # 二輪=45〜62Hz（bike-pass1/2の実測 47〜62Hz）
+    lo, hi = (85.0, 120.0) if engine_class == "moped" else (45.0, 62.0)
     f0 = float(rng.uniform(lo, hi))
     # 回転数のゆっくりした変動（スロットル感、±12%）
     drift = colored_noise(n, fs, rng, slope=2.5, f_lo=0.2)
     f_inst = f0 * (1.0 + 0.12 * drift)
 
     pulses = _pulse_train(n, fs, f_inst, duty=0.25, rng=rng)
-    # 排気の共鳴色付け: パルス列を2つの帯域で整形（マフラー胴鳴り150-400Hz+口radiation 400-1.5k）
+    # 色付け: 実録参照のフィット包絡（1/6oct 51点）をそのまま適用
+    ref = _BREF["moped" if engine_class == "moped" else "motorcycle"]
     X = np.fft.rfft(pulses - pulses.mean())
     f = np.fft.rfftfreq(n, 1.0 / fs)
-    body = np.exp(-0.5 * ((np.log2(np.maximum(f, 1e-9) / 250.0)) / 0.8) ** 2)
-    mouth = 0.6 * np.exp(-0.5 * ((np.log2(np.maximum(f, 1e-9) / 800.0)) / 1.0) ** 2)
-    exhaust = np.fft.irfft(X * (body + mouth), n=n)
+    lvl = np.interp(np.log2(np.maximum(f, 1e-9)),
+                    np.log2(np.array(ref["freqs"], float)),
+                    np.array(ref["db"], float))
+    exhaust = np.fft.irfft(X * (10.0 ** (lvl / 20.0)), n=n)
     exhaust /= np.std(exhaust)
 
-    # ラスプ（排気の乱流ノイズ、発火に同期して粒立つ）
+    # ラスプ（発火同期の乱流ノイズ、同じ実測包絡で色付け=浮かない）
     rasp_env = 0.4 + 0.6 * pulses / max(pulses.max(), 1e-9)
-    rasp = colored_noise(n, fs, rng, slope=0.5, f_lo=300.0) * rasp_env
+    white = rng.standard_normal(n)
+    rasp = np.fft.irfft(np.fft.rfft(white) * (10.0 ** (lvl / 20.0)), n=n) * rasp_env
     rasp /= np.std(rasp)
 
-    # メカノイズ（カム/チェーンの中高域、小さめ）
-    mech = colored_noise(n, fs, rng, slope=0.0, f_lo=1000.0)
-    Xm = np.fft.rfft(mech)
-    Xm[f > 5000.0] = 0.0
-    mech = np.fft.irfft(Xm, n=n)
-    mech /= np.std(mech)
-
     x = np.zeros(n)
-    for sig, frac in ((exhaust, exhaust_frac_a), (rasp, rasp_frac_a),
-                      (mech, mech_frac_a)):
+    for sig, frac in ((exhaust, exhaust_frac_a + mech_frac_a),
+                      (rasp, rasp_frac_a)):
         r = a_weighted_rms(sig, fs)
         x = x + (np.sqrt(frac) / r) * sig
     peak_val = float(np.max(np.abs(x)))
