@@ -2010,3 +2010,14 @@ scratchpad/check1-5.py）
 - 次段チェーン（設計書追記2の5番）: 空メタ許容preproc確認（_test_v11_empty_label_patch.py
   参照）→datasets_v12独立ルート（8クラス辞書）→距離GT(step19移植)→adpit_dist→
   run3基準線→ゲート宣言→8クラスinit ckpt→学習
+
+## v12全量生成 完走（2026-08-05 19:31、サーバーjob249）
+
+- **10,200/10,200本**（core再生成7,200＋新クラス3,000）、12シャード1時間12分、
+  エラー・ピーク超過ゼロ。-6dBヘッドルーム規約が機能
+- 品質保証の三点セット: 複製ドリフト検査（コアでm9原本とビット一致）・
+  ローカル/サーバービット一致（34c7b1a7dd14…）・決定論スキップ再開
+- 次段チェーン（設計書追記2の5番・未着手）: ①空メタ許容preproc確認
+  （_test_v11_empty_label_patch.py参照）②datasets_v12独立ルート＋8クラス辞書
+  ③index/ラベル抽出（accdoa/adpit）④距離GT(step19移植)→adpit_dist
+  ⑤run3でv12-val基準線（6クラス部分）⑥ゲート数値宣言⑦8クラスSDE init ckpt⑧学習29分
