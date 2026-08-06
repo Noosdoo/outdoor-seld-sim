@@ -17,7 +17,10 @@ T1-T3（test_sde_units.py）は「損失・ラベル・初期重み」のt=0等�
 """
 import glob
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 import numpy as np
 import torch
