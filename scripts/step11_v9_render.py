@@ -5,8 +5,9 @@
 入力に読む（idx算術なし）。v8までのstep6には一切触れない（凍結・新規ファイル方針）。
 
 v8からの本質的な変更:
-  - SNR/SIRのつまみは存在しない。全成分を物理の絶対音量（法規レンジ、A特性で較正、
-    src/outdoor_seld/calibration.py が唯一の換算）で置き、ただ足す。post_scaleなし。
+  - SNR/SIRのつまみは存在しない。全成分を物理の絶対音量（出典層別レンジ=LAW辞書、
+    A特性仮定で較正、src/outdoor_seld/calibration.py が唯一の換算）で置き、ただ足す。
+    post_scaleなし。
   - 車は妨害でなく第5クラス（ラベルあり、可聴フレームのみ）。第6クラス踏切=固定音源。
   - マイクは静止/歩行の混在（歩行=直線1.0-1.4m/s。geometry/fastsimの移動マイク経路）。
   - 危険層はマイク相対CPA min||car(t)-mic(t)|| で制御・記録（scene.json cpa_rel_*）。
@@ -109,8 +110,12 @@ TEMP_C, PRESS_ATM, RH = 20.0, 1.0, 50.0
 CLASS_IDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3,
              "car_drive": 4, "crossing": 5}
 
-# 法規レンジ (dB(A) at 基準距離[m])。根拠: out/sound_class_research_2026-07-16.md /
+# 音源レベルレンジ (dB(A)仮定 at 基準距離[m])。根拠: out/sound_class_research_2026-07-16.md /
 # v9_values_research。較正は「1m相当レベル」= L + 20log10(ref_m)（幾何減衰1/r, r0=1m）
+# 【第8回監査2026-08-06】変数名LAWは歴史的経緯（初版が法規中心）で、出典は層別:
+#   siren/horn/backup=法規・省令系, bike_bell=英実測研究(Edworthy2023),
+#   crossing=通説値±設計幅(一次規格未確認), car_drive=欧州pass-by実測。
+#   非法規値を含むため「法規レンジ」と呼ばない（正=参考文献台帳・発表骨子16節）
 LAW = {"siren": (90.0, 120.0, 20.0), "horn": (93.0, 112.0, 7.0),
        "backup_beep": (87.0, 112.0, 1.2), "bike_bell": (80.0, 95.0, 1.0),
        "crossing": (75.0, 85.0, 1.0), "car_drive": (60.0, 67.0, 10.0)}

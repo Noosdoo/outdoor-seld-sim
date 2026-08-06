@@ -9,6 +9,9 @@ v3.1からの変更（内部監査=Opus 2026-08-03 の指摘対応）:
 - **v1比較列**を追加: v1なら通知されていた車の数と、v3で無音化した数を明示
   （安全側の後退を隠さない）
 - 役割③到達リードの分布(p50/p90/≥0.5s/≥2.0s)を報告
+- 【2026-08-06 第8回監査NOTIFY-3対応】車ありクリップ内の帰属不能トリガ
+  （±25°超）を件数計上（旧v3.2はno-opで消えていた=誤報の過小評価穴）。
+  規則(T3/T2/SUPP/2フレーム/±25°)は不変=fold3追試向け凍結対象。
 
 発火タイミング: 役割②の弱通知はv1ルールのまま。強(③)/中(②格上げ)は距離トリガ
 （独立トリガ。v1発火ゲートは通らない=この点は仕様として明記）。
@@ -102,7 +105,8 @@ def main():
     v1_to_silent = defaultdict(int)        # GT tier -> v1通知→v3抑制の台数
     esc_lead = []
     n_fire_unattr = 0                      # 帰属不能のv1発火
-    n_trig_false = {"強": 0, "中": 0}      # GT車に帰属できなかった距離トリガ
+    n_trig_false = {"強": 0, "中": 0}      # 車なしクリップの距離トリガ誤発火(本数)
+    n_trig_unattr = {"強": 0, "中": 0}     # 車ありクリップ内の±25°超トリガ(件数)
     n_carless_clips = 0
 
     for clip in sorted(pred_ev.keys()):
@@ -159,7 +163,7 @@ def main():
             for j, a in trig[lv]:
                 tr = attribute(j, a)
                 if tr is None:
-                    n_trig_false[lv] += 0  # クリップ単位計上は車なし側のみ
+                    n_trig_unattr[lv] += 1
                     continue
                 if best[tr] is None or ORDER[upgrade] > ORDER[best[tr]]:
                     best[tr] = upgrade
@@ -215,6 +219,9 @@ def main():
           f"- 帰属不能のv1発火: {n_fire_unattr}件（±25°ゲート超）",
           f"- GT車なしクリップ {n_carless_clips}本での距離トリガ誤発火: "
           f"強{n_trig_false['強']}本 / 中{n_trig_false['中']}本",
+          f"- 車ありクリップ内の帰属不能トリガ(±25°超・件数・強は中と重複計上): "
+          f"強{n_trig_unattr['強']}件 / 中{n_trig_unattr['中']}件"
+          "（誤報か至近スイープの実車かは個別監査対象=第8回監査NOTIFY-3）",
           "", "※分母は車(トラック)単位。v9系の「クリップ単位97.3%」とは別物。",
           "※強/中は距離トリガ独立発火＝v1の発火ゲートを通らない（仕様として明記）。"]
     (OUT / "notify_v3_val.md").write_text("\n".join(R) + "\n", encoding="utf-8")
