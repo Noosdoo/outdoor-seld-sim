@@ -80,7 +80,8 @@ def _make_dry_v12(src: dict) -> np.ndarray:
     if cls != "car_drive":
         return _orig_make_dry(src)
     seed = p["audio_seed"]
-    variant = _car_variant(seed)
+    # 評価専用セット等での強制指定（既存行はキー無し=ハッシュ抽選のまま、決定論不変）
+    variant = p.get("force_variant") or _car_variant(seed)
     src["car_variant"] = variant            # scene.jsonに来歴を残す
     if variant == "ev":
         rng = np.random.default_rng(seed)
