@@ -2121,3 +2121,13 @@ scratchpad/check1-5.py）
   SELD差0.001は判定運用上の実害小）。採用時は通知層・eval系のw3再採点が必要
 - 採点物: out/v12_score_w3/ out/v12_score_cont/（class_table+dist）、予測=
   out/predictions_v12_w3/ out/predictions_v12_cont/
+
+## W0対照run完走・監査バッチ全消化（2026-08-06 22:50、job317 COMPLETED 29分）
+
+- **W_DIST=0対照: best val SELD 0.072 vs run3(W=2.0) 0.070**（同一warm start・100ep）
+  →距離勾配によるSELD劣化なしの直接証拠（監査・問1の最大の穴を消化）
+- T4-T6全PASS（実ckptヘッド等価・デコードチェーン等価・dist値h5全照合）
+- 第8回監査報告に消化状況の追記完了（条件1-5すべて✅、残=警笛省令値・サイレン条文・
+  B2真偽判別・G5未達の記録）
+- 今夜の監査対応バッチはこれで完了。次の大物=タイトル確定(8/25)と中間発表資料。
+  w3をv12本番採用する場合は通知層・eval系のw3再採点を先に行うこと
