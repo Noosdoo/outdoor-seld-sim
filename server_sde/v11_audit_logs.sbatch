@@ -40,9 +40,11 @@ cp $HOME/PSELDNets_logs/outdoor_siren_v11/runs/outdoor_siren_v11_sde_run3/train.
 cp $HOME/PSELDNets_logs/outdoor_siren_v12/runs/outdoor_siren_v12_sde_w3/train.log \
    $LOGS/v12_w3_train.log
 
-# v12 core通知 v3.3（w3予測）
+# v12 core通知 v3.3（連結25°）と v3.4（連結60°=設計定数由来）の両方（w3予測）
 cd $E2E
+W3VAL=$HOME/PSELDNets_logs/outdoor_siren_v12/runs/infer_v12_sde_w3_val/val_all.csv
 PYTHONPATH=scripts:src $PS/.venv/bin/python scripts/_v12_notify_server33.py \
-  $HOME/PSELDNets_logs/outdoor_siren_v12/runs/infer_v12_sde_w3_val/val_all.csv \
-  $E2E/out/v12_notify_w3_v33
+  $W3VAL $E2E/out/v12_notify_w3_v33
+NOTIFY_LINK_DEG=60 PYTHONPATH=scripts:src $PS/.venv/bin/python \
+  scripts/_v12_notify_server33.py $W3VAL $E2E/out/v12_notify_w3_v34
 echo AUDIT_LOGS_DONE
