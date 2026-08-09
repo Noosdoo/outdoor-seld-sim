@@ -21,6 +21,7 @@ v3.2からの変更（ルール変更は①のみ。結果を見る前に凍結�
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -47,6 +48,12 @@ OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else \
 MANIFEST_FILTER = None   # サーバwrapper等がクリップ絞り込み関数を注入する
 CAR = 4
 AZ_MATCH = 25.0
+# 連結幅(deg)。既定25=v3.3。v3.4=60: 事前凍結済みの設計定数のみから導出
+# （車速上限15m/s・強トリガ域d=1.5m・フレーム0.1s → 最大方位変化
+#   atanに拠らず上限 v/d = 10rad/s = 57.3°/フレーム → 60°に切上げ）。
+# 選択の経緯はv3.3の結果を見た後だが、値自体は設計定数由来であることを
+# 対応報告に明記し、以後の連結幅変更は行わない（停止規則）。
+LINK_DEG = float(os.environ.get("NOTIFY_LINK_DEG", "25.0"))
 T3, T2, SUPP = 1.5, 3.0, 3.2
 ORDER = {"抑制": 0, "中": 1, "強": 2}
 
@@ -101,7 +108,7 @@ def dist_triggers(dseq, thresh):
         close = [(a, d) for a, d in dseq.get(j, []) if d <= thresh]
         if close and prev:
             linked = [(a, d) for a, d in close
-                      if any(cdiff(a, pa) <= AZ_MATCH for pa, _ in prev)]
+                      if any(cdiff(a, pa) <= LINK_DEG for pa, _ in prev)]
             if linked:
                 a, _ = min(linked, key=lambda x: x[1])
                 hits.append((j, a))
@@ -238,8 +245,8 @@ def main():
 
     R = ["# 通知層v3.3（Sol再監査対応版）採点", "",
          f"対象クリップ: {len(clips):,}本（manifest基準・予測ゼロ{n_nopred_clips}本を含む）。",
-         "弱通知=v1ルール。強/中=距離トリガ(2フレーム連続＋方位±25°の同一物体連続性、"
-         "±25°帰属)。", "",
+         f"弱通知=v1ルール。強/中=距離トリガ(2フレーム連続＋方位±{LINK_DEG:.0f}°の"
+         "同一物体連続性、±25°帰属)。", "",
          "## 車単位の混同行列（GT tier × 最終出力）＋v1比較",
          "| GT＼出力 | 強(③) | 中(②) | 抑制 | 未通知 | v1なら通知 | **v1通知→v3無音化** |",
          "| --- | --- | --- | --- | --- | --- | --- |"]

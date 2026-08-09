@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -26,6 +27,7 @@ OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else \
 DS = ROOT / "out" / "dataset_outdoor_siren_v12"
 CLASSES = {4: "車", 6: "キックボード", 7: "バイク"}
 AZ_MATCH = 25.0
+LINK_DEG = float(os.environ.get("NOTIFY_LINK_DEG", "25.0"))  # v3.4=60(設計定数由来)
 T3, T2, SUPP = 1.5, 3.0, 3.2
 ORDER = {"中": 1, "強": 2}
 
@@ -49,7 +51,7 @@ def dist_triggers(dseq, thresh):
         close = [(a, d) for a, d in dseq.get(j, []) if d <= thresh]
         if close and prev:
             linked = [(a, d) for a, d in close
-                      if any(cdiff(a, pa) <= AZ_MATCH for pa, _ in prev)]
+                      if any(cdiff(a, pa) <= LINK_DEG for pa, _ in prev)]
             if linked:
                 a, _ = min(linked, key=lambda x: x[1])
                 hits.append((j, a))
@@ -88,7 +90,8 @@ def main():
 
     R = ["# 通知層v12b: 新クラス通知（Sol再監査対応版）", "",
          f"対象クリップ: {len(clips):,}本（manifest基準・予測ゼロ{n_nopred}本含む）。",
-         "規則=車v3.3の距離規則を全クラス共通流用。強: ≤1.5m×2フレーム連続＋方位連結 /",
+         f"規則=車v3.3系の距離規則を全クラス共通流用（連結幅±{LINK_DEG:.0f}°）。"
+         "強: ≤1.5m×2フレーム連続＋方位連結 /",
          "中: ≤3.0m×同 / 帰属±25°。v1知覚ゲートは適用外（車の行もこの土俵）。", ""]
 
     for cls, name in CLASSES.items():
