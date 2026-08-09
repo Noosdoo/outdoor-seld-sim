@@ -174,6 +174,11 @@ def main():
                 n = len(trig[lv]) if lv == "強" else \
                     len(trig["中"]) - len(trig["強"])
                 n_trig_false[lv] += int(n > 0)
+                # 【Sol検証第2R】GT車なしクリップのトリガもepisode分類に含める
+                # （定義上すべて完全誤報。従来はここで漏れて表が非網羅だった）
+                for ep in group_episodes(trig[lv]):
+                    ep_cls[lv]["GT行なし(完全誤報)"] += 1
+                    ep_false_clips[lv].add(clip)
             continue
 
         best = {tr: None for tr in gt_tracks}

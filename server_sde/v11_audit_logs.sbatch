@@ -23,6 +23,11 @@ cp $E2E/server_sde/test_sde_units.py $E2E/server_sde/test_sde_units2.py \
 {
   echo "e2e repo SHA: $SHA"
   echo "date: $(date -Iseconds)  job: ${SLURM_JOB_ID}"
+  # 【Sol検証第2R】リポジトリSHAはscp運用の未追跡ファイルを固定しないため、
+  # 実際に実行するファイル自体のハッシュを証跡として残す
+  sha256sum test_sde_units.py test_sde_units2.py test_sde_units3.py \
+            sde_patch.py _preproc_sde.py \
+            $E2E/scripts/step12_notify_v33.py $E2E/scripts/_v12_notify_server33.py
   echo "== T1-T3 (test_sde_units.py) =="
   .venv/bin/python test_sde_units.py
   echo "== T4-T5+旧T6 (test_sde_units2.py) =="

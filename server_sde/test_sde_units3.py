@@ -57,6 +57,14 @@ assert h5path, "adpit_dist h5が無い"
 hf = h5py.File(h5path[0], "r")
 
 ppp = ds.points_per_predictions
+# 【Sol検証第2R】pad>0ケース: v11は全クリップ10秒でpaddingが自然発生しないため、
+# 実在クリップの前方93フレームだけを切り出す合成セグメントを追加して
+# 実__getitem__のpadding分岐を通す（index行の列構造 [path, begin, end,
+# pad_before, pad_after] は本物と同一）。
+seg0 = list(ds.segments_list[0])
+ds.segments_list.append(
+    [seg0[0], 0, int(93 * ppp), 0, int(7 * ppp)])
+idxs["合成短尾(pad>0)"] = len(ds.segments_list) - 1
 for name, idx in idxs.items():
     seg = ds.segments_list[idx]
     fn = Path(seg[0]).stem
