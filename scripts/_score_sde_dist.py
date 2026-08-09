@@ -31,8 +31,9 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 CLS_JP = {0: "サイレン", 1: "クラクション", 2: "バック音", 3: "ベル",
-          4: "車", 5: "踏切"}
+          4: "車", 5: "踏切", 6: "キックボード", 7: "バイク"}
 CAR = 4
+N_CLS = 8   # 【Sol再監査2026-08-09】v12系は8クラス。v11予測ではn=0のクラスが単に非表示になる
 
 
 def tier(d: float) -> str:
@@ -62,9 +63,15 @@ def main():
             pred[p[0]][(int(p[1]), int(p[2]))].append(
                 (float(p[3]), float(p[5])))
 
-    pairs = []          # (class, gt_dist, pred_dist)
+    # 【Sol再監査・条件2】manifest基準: 予測ゼロのクリップもGT分母に含める
+    prefixes = {k.rsplit("_mix", 1)[0] for k in pred.keys()}
+    clips = sorted({p.stem for p in META.glob("*.csv")
+                    if p.stem.rsplit("_mix", 1)[0] in prefixes}
+                   | set(pred.keys()))
+
+    pairs = []          # (class, gt_dist, pred_dist, 方位差)
     n_gt = n_paired = 0
-    for clip in sorted(pred.keys()):
+    for clip in clips:
         gt = defaultdict(list)
         mp = META / f"{clip}.csv"
         if not mp.exists():
@@ -75,32 +82,40 @@ def main():
                 gt[(int(g[0]), int(g[1]))].append((float(g[3]), float(g[5])))
         for key, gts in gt.items():
             n_gt += len(gts)
-            preds = list(pred[clip].get(key, []))
+            preds = list(pred.get(clip, {}).get(key, []))
             # 方位最近傍のgreedyペアリング
             for gaz, gdist in sorted(gts, key=lambda x: x[0]):
                 if not preds:
                     break
                 j = int(np.argmin([circ_diff(gaz, paz) for paz, _ in preds]))
                 paz, pdist = preds.pop(j)
-                pairs.append((key[1], gdist, pdist))
+                pairs.append((key[1], gdist, pdist, circ_diff(gaz, paz)))
                 n_paired += 1
 
-    arr = np.array([(c, g, p) for c, g, p in pairs])
-    cls, gd, pd_ = arr[:, 0].astype(int), arr[:, 1], arr[:, 2]
+    arr = np.array(pairs)
+    cls, gd, pd_, azd = (arr[:, 0].astype(int), arr[:, 1], arr[:, 2],
+                         arr[:, 3])
     err = np.abs(pd_ - gd)
 
-    R = ["# SDE距離推定の採点（val 1,200本）", "",
+    R = [f"# SDE距離推定の採点（manifest {len(clips):,}本）", "",
          f"- GTフレーム対 {n_gt:,} / ペア成立 {n_paired:,} "
          f"({100*n_paired/max(n_gt,1):.1f}%)",
          f"- **距離MAE {err.mean():.2f}m / 中央絶対誤差 {np.median(err):.2f}m**"
          f"（全クラス、GT距離実測レンジ {gd.min():.2f}〜{gd.max():.2f}m）",
          f"- 予測距離レンジ {pd_.min():.2f}〜{pd_.max():.2f}m / 上限0.05m内への"
-         f"張り付き {100*(pd_ >= pd_.max()-0.05).mean():.1f}%"
+         f"張り付き {100*(pd_ >= pd_.max()-0.05).mean():.1f}%（分母=成立ペア"
+         f"{n_paired:,}）"
          "（張り付きが大きい場合、上限超のGT帯のMAEは学習性能でなく出力構造の"
          "上限の帰結=第8回監査SDE-1。旧線形+tanh版は10mが構造上限だった）",
+         f"- ペア方位差: 中央{np.median(azd):.1f}° / >15° {100*(azd > 15).mean():.1f}%"
+         f" / >25° {100*(azd > 25).mean():.1f}% / >90° {100*(azd > 90).mean():.1f}%"
+         f"（Sol再監査A層: 方位ゲートなしgreedyペアの開示）",
+         f"- ±25°ゲート付き比較: ペア率 {100*(azd <= 25).sum()/max(n_gt,1):.1f}%"
+         f" / MAE {err[azd <= 25].mean():.2f}m / 中央 "
+         f"{np.median(err[azd <= 25]):.2f}m",
          "", "## クラス別",
          "| クラス | n | MAE | 中央 |", "| --- | --- | --- | --- |"]
-    for ci in range(6):
+    for ci in range(N_CLS):
         m = cls == ci
         if m.sum():
             R.append(f"| {CLS_JP[ci]} | {m.sum():,} | {err[m].mean():.2f}m "

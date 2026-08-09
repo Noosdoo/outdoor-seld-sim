@@ -35,9 +35,16 @@ e0s.CLASSES_JA = ["サイレン", "クラクション", "バック音", "自転�
                   "キックボード", "バイク"]
 
 
+def _manifest(pred):
+    """【Sol再監査・条件2】予測ゼロのクリップも分母に含める全クリップ巡回。"""
+    prefixes = {c.rsplit("_mix", 1)[0] for c in pred}
+    return sorted({p.stem for p in (DS12 / "metadata").glob("*.csv")
+                   if p.stem.rsplit("_mix", 1)[0] in prefixes} | set(pred))
+
+
 def class_table8(pred):
     stats = {c: {"tp": 0, "n": 0, "errs": []} for c in range(8)}
-    for clip in sorted(pred):
+    for clip in _manifest(pred):
         gt = defaultdict(dict)
         for line in open(DS12 / "metadata" / f"{clip}.csv"):
             q = line.strip().split(",")
@@ -50,7 +57,7 @@ def class_table8(pred):
                 q = line.strip().split(",")
                 mask[(int(q[0]), int(q[1]))] = float(q[2])
         for k, evs in gt.items():
-            pk = pred[clip].get(k, {})
+            pk = pred.get(clip, {}).get(k, {})
             for c, (gaz, gel) in evs.items():
                 if mask.get((k, c), 99.0) < 0.0:
                     continue
@@ -64,7 +71,7 @@ def class_table8(pred):
 def car_variant_recall(pred):
     """単独車クリップ限定の車recallをバリアント別に分解。"""
     out = {v: {"tp": 0, "n": 0} for v in ("normal", "heavy", "ev")}
-    for clip in sorted(pred):
+    for clip in _manifest(pred):
         sj = DS12 / "work" / clip / "scene.json"
         if not sj.exists():
             continue
@@ -86,7 +93,7 @@ def car_variant_recall(pred):
                 if mask.get((k, 4), 99.0) < 0.0:
                     continue
                 out[var]["n"] += 1
-                if 4 in pred[clip].get(k, {}):
+                if 4 in pred.get(clip, {}).get(k, {}):
                     out[var]["tp"] += 1
     return out
 
