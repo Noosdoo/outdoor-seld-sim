@@ -110,24 +110,6 @@
   <footer><div class="chips"></div><span class="pageno"></span></footer>
 </section>
 
-<!-- 2 道筋 -->
-<section class="slide" data-step="1">
-  <header><div class="kicker">RESEARCH ROADMAP</div>
-    <h2>本研究の問いと道筋</h2></header>
-  <div class="body">
-    <p>問い：屋外で「種類＋方向＋<strong>距離</strong>」を難聴者に届けるために、<strong>どの物理が必要なのか</strong>。</p>
-    <div class="cols" style="grid-template-columns:repeat(5,1fr); gap:14px">
-      <div class="card"><div class="tag ink">① 問い</div><p>どの物理が要るのか</p></div>
-      <div class="card"><div class="tag ink">② 空白</div><p>屋外の方向つきデータが存在しない</p></div>
-      <div class="card" style="border-color:var(--amber)"><div class="tag amb">③ 土俵づくり</div><p>物理を自作し誤差ゼロラベルの教科書を作る<br><strong>→ 8クラス・日本準拠に拡張</strong></p></div>
-      <div class="card" style="border-color:var(--amber)"><div class="tag amb">④ 検証</div><p>土俵が信用できるかを潰す<br><strong>→ 未使用セットで確定評価済み</strong></p></div>
-      <div class="card"><div class="tag ink">⑤ ablation</div><p>物理を1つずつ外して問いに答える<br><strong>→ 9月実施・計画確定</strong></p></div>
-    </div>
-    <p style="font-size:19px;color:var(--muted)">今回の進捗＝③の拡張と④の完了。⑤は実録評価と同じ土俵で行う。</p>
-  </div>
-  <footer><div class="chips"></div><span class="pageno"></span></footer>
-</section>
-
 <!-- 3 研究背景 -->
 <section class="slide" data-step="1">
   <header><div class="kicker">BACKGROUND</div><h2>研究背景 — 歩行者の安全は聴覚に支えられている</h2></header>
@@ -181,7 +163,7 @@
 </section>
 
 <!-- 5 SELDとは -->
-<section class="slide" data-step="1">
+<section class="slide" data-step="2">
   <header><div class="kicker">PRELIMINARIES</div><h2>SELDとは — 画像でいう物体検出の、音・方向版</h2></header>
   <div class="body">
     <p><strong>SELD</strong>（Sound Event Localization and Detection）＝音の<strong>種類</strong>と<strong>時間</strong>と<strong>方向</strong>を、複数の音源について同時に当てるタスク。</p>
@@ -214,36 +196,100 @@
 </section>
 
 <!-- 6 関連研究1 -->
-<section class="slide" data-step="1">
+<section class="slide" data-step="3">
   <header><div class="kicker">RELATED WORK 1/2</div><h2>PSELDNets（2024）— SELDの基盤モデル</h2></header>
-  <div class="body">
-    <ul class="pts">
+  <div class="body" style="flex-direction:row; gap:32px; align-items:center">
+    <ul class="pts" style="flex:1">
       <li>大規模合成データで事前学習した<strong>SELD基盤モデル</strong>（1,167時間・170クラス、主要3データセットでSOTA）</li>
       <li>省データ適応手法 AdapterBit を導入</li>
       <li>出力は multi-ACCDOA（同一クラスの音を最大3つまで同時検出）</li>
       <li class="amber">本研究は、この基盤に<span class="em">距離推定ヘッドを拡張</span>し、屋外・移動音源・8クラスへ応用する</li>
     </ul>
+    <figure style="flex:1.05">
+      <svg viewBox="0 0 540 300" style="max-width:100%;height:auto" role="img" aria-label="大規模合成データで事前学習した基盤モデルを、本研究が距離ヘッド拡張つきで屋外8クラスにファインチューニングする流れ">
+        <defs><marker id="ar6" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#3A4658"/></marker></defs>
+        <rect x="14" y="30" width="150" height="104" fill="#EFEFEA" stroke="#D9DAD2"/>
+        <rect x="22" y="22" width="150" height="104" fill="#FFFFFF" stroke="#D9DAD2"/>
+        <text x="97" y="60" text-anchor="middle" font-size="14.5" font-weight="800" fill="#16233A">大規模合成データ</text>
+        <text x="97" y="84" text-anchor="middle" font-size="13" fill="#3A4658">1,167時間</text>
+        <text x="97" y="104" text-anchor="middle" font-size="13" fill="#3A4658">170クラス</text>
+        <line x1="176" y1="76" x2="222" y2="76" stroke="#3A4658" stroke-width="2.5" marker-end="url(#ar6)"/>
+        <text x="199" y="62" text-anchor="middle" font-size="12" fill="#66707F">事前学習</text>
+        <rect x="228" y="34" width="130" height="84" fill="#16233A"/>
+        <text x="293" y="70" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">SELD</text>
+        <text x="293" y="92" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">基盤モデル</text>
+        <line x1="362" y1="76" x2="408" y2="76" stroke="#3A4658" stroke-width="2.5" marker-end="url(#ar6)"/>
+        <text x="385" y="50" text-anchor="middle" font-size="12" fill="#66707F">少データ適応</text>
+        <text x="385" y="64" text-anchor="middle" font-size="12" fill="#66707F">(AdapterBit)</text>
+        <rect x="414" y="22" width="112" height="108" fill="#FFF8E8" stroke="#E8A200" stroke-width="2.5"/>
+        <text x="470" y="50" text-anchor="middle" font-size="14" font-weight="800" fill="#B37E00">本研究</text>
+        <text x="470" y="74" text-anchor="middle" font-size="12.5" fill="#16233A">屋外・移動音源</text>
+        <text x="470" y="93" text-anchor="middle" font-size="12.5" fill="#16233A">8クラス</text>
+        <text x="470" y="115" text-anchor="middle" font-size="12.5" font-weight="800" fill="#B37E00">＋距離ヘッド</text>
+        <g>
+          <rect x="228" y="176" width="298" height="96" fill="#FFFFFF" stroke="#D9DAD2"/>
+          <text x="244" y="200" font-size="12.5" fill="#66707F">出力ヘッド（multi-ACCDOA）</text>
+          <g font-size="12.5" fill="#16233A">
+            <rect x="244" y="212" width="60" height="24" fill="#EFEFEA" stroke="#D9DAD2"/><text x="274" y="229" text-anchor="middle">x</text>
+            <rect x="310" y="212" width="60" height="24" fill="#EFEFEA" stroke="#D9DAD2"/><text x="340" y="229" text-anchor="middle">y</text>
+            <rect x="376" y="212" width="60" height="24" fill="#EFEFEA" stroke="#D9DAD2"/><text x="406" y="229" text-anchor="middle">z</text>
+            <rect x="442" y="212" width="68" height="24" fill="#FFF8E8" stroke="#E8A200" stroke-width="2"/><text x="476" y="229" text-anchor="middle" font-weight="800" fill="#B37E00">距離</text>
+          </g>
+          <text x="244" y="260" font-size="12" fill="#66707F">方向(x,y,z)に距離の1軸を追加 — SELD部分は等価性テストで不変を担保</text>
+        </g>
+        <line x1="470" y1="134" x2="470" y2="172" stroke="#B37E00" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ar6)"/>
+      </svg>
+      <figcaption>基盤モデルの転移＋距離ヘッド拡張（黄＝本研究の追加部分）</figcaption>
+    </figure>
   </div>
   <footer><div class="chips"></div><span class="pageno"></span></footer>
 </section>
 
 <!-- 7 関連研究2 -->
-<section class="slide" data-step="2">
+<section class="slide" data-step="3">
   <header><div class="kicker">RELATED WORK 2/2</div><h2>DynamicSound（2026）— 屋外音響の物理シミュレータ</h2></header>
-  <div class="body">
-    <ul class="pts">
-      <li>室内RIRツールの限界を屋外向けに解いたオープンソース</li>
-      <li>自由音場・任意マイクアレイ・音源の連続3D移動</li>
-      <li>屋外物理を明示的にモデル化：伝搬遅延・ドップラー・距離減衰・大気吸収・一次反射</li>
-    </ul>
+  <div class="body" style="gap:14px">
+    <div class="cols c2" style="align-items:center">
+      <ul class="pts">
+        <li>室内RIRツールの限界を屋外向けに解いたオープンソース</li>
+        <li>自由音場・任意マイクアレイ・音源の連続3D移動</li>
+        <li>屋外物理を明示的にモデル化：伝搬遅延・ドップラー・距離減衰・大気吸収・一次反射</li>
+      </ul>
+      <figure>
+        <svg viewBox="0 0 540 250" style="max-width:100%;height:auto" role="img" aria-label="移動する音源からマイクアレイまで、伝搬遅延・ドップラー・距離減衰・大気吸収を経て届き、地面の一次反射も加わる図">
+          <defs><marker id="ar7" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#3A4658"/></marker></defs>
+          <g fill="none" stroke="#16233A" stroke-opacity=".22" stroke-width="1.8">
+            <circle cx="84" cy="66" r="16"/><circle cx="84" cy="66" r="30"/><circle cx="84" cy="66" r="46"/>
+          </g>
+          <circle cx="84" cy="66" r="9" fill="#E8A200"/>
+          <line x1="104" y1="42" x2="150" y2="30" stroke="#B37E00" stroke-width="2.5" marker-end="url(#ar7)"/>
+          <text x="106" y="22" font-size="12.5" fill="#B37E00" font-weight="700">移動する音源（3D・連続）</text>
+          <line x1="100" y1="76" x2="424" y2="160" stroke="#3A4658" stroke-width="2.5" marker-end="url(#ar7)"/>
+          <g font-size="12" fill="#16233A">
+            <rect x="128" y="88"  width="66" height="22" fill="#FFFFFF" stroke="#D9DAD2"/><text x="161" y="103" text-anchor="middle">伝搬遅延</text>
+            <rect x="204" y="106" width="72" height="22" fill="#FFFFFF" stroke="#D9DAD2"/><text x="240" y="121" text-anchor="middle">ドップラー</text>
+            <rect x="286" y="124" width="66" height="22" fill="#FFFFFF" stroke="#D9DAD2"/><text x="319" y="139" text-anchor="middle">距離減衰</text>
+            <rect x="362" y="142" width="66" height="22" fill="#FFFFFF" stroke="#D9DAD2"/><text x="395" y="157" text-anchor="middle">大気吸収</text>
+          </g>
+          <line x1="20" y1="216" x2="520" y2="216" stroke="#66707F" stroke-width="2"/>
+          <text x="26" y="234" font-size="12" fill="#66707F">地面</text>
+          <path d="M96 78 L258 216 L436 176" fill="none" stroke="#66707F" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#ar7)"/>
+          <text x="258" y="240" text-anchor="middle" font-size="12" fill="#66707F">一次反射</text>
+          <rect x="430" y="150" width="88" height="40" rx="6" fill="#16233A"/>
+          <g fill="#F7F7F3"><circle cx="448" cy="170" r="4"/><circle cx="466" cy="162" r="4"/><circle cx="484" cy="170" r="4"/><circle cx="466" cy="178" r="4"/></g>
+          <text x="474" y="206" text-anchor="middle" font-size="12.5" fill="#16233A" font-weight="700">4chマイクアレイ</text>
+        </svg>
+        <figcaption>直接音（物理4段）＋地面反射がマイクアレイに届くまでを物理式で計算</figcaption>
+      </figure>
+    </div>
     <div class="callout"><div class="t">それでも残る空白＝本研究の位置</div>
-      <p><strong>歩行者装着 × 複数危険クラス同時 × 距離まで</strong>を屋外で扱った研究は存在しない。分業型（分類CNN＋信号処理DOA）は複数音源の同時発生で「種類と方向の対応付け」が壊れる → 同時推定型SELDを採用する。</p></div>
+      <p><strong>歩行者装着 × 複数危険クラス同時 × 距離まで</strong>を屋外で扱った研究は存在しない。分業型（分類CNN＋信号処理DOA）は複数音源の同時発生で対応付けが壊れる → 同時推定型SELDを採用。</p></div>
   </div>
   <footer><div class="chips"></div><span class="pageno"></span></footer>
 </section>
 
 <!-- 8 提案手法1 -->
-<section class="slide" data-step="3">
+<section class="slide" data-step="4">
   <header><div class="kicker">PROPOSED METHOD 1/2</div><h2>提案手法 — 合成データで学習を成立させる</h2></header>
   <div class="body">
     <div class="cols c3">
@@ -261,7 +307,7 @@
 </section>
 
 <!-- 9 提案手法2 -->
-<section class="slide" data-step="3">
+<section class="slide" data-step="4">
   <header><div class="kicker">PROPOSED METHOD 2/2</div><h2>2層の仕組み — 推定距離で「いつ・どの強さで」を決める</h2></header>
   <div class="body" style="flex-direction:row; gap:36px">
     <div style="flex:1.1; display:flex; flex-direction:column; gap:14px">
@@ -296,7 +342,7 @@
 </section>
 
 <!-- 10 検証1 -->
-<section class="slide" data-step="4">
+<section class="slide" data-step="5">
   <header><div class="kicker">RESULTS 1/2 — 確定評価</div><h2>検証 — 事前固定した未使用セットでの一発評価</h2></header>
   <div class="body">
     <p style="font-size:19px">作法：合格基準を<strong>先に宣言</strong> → <strong>未使用の評価セット1,800本</strong>を新規生成 → <strong>1回だけ</strong>推論・採点（答案を見てから基準を変えられない形）。AI外部監査（敵対的レビュー3巡）で<span class="em">完全合格</span>。</p>
@@ -314,7 +360,7 @@
 </section>
 
 <!-- 11 検証2 -->
-<section class="slide" data-step="4">
+<section class="slide" data-step="5">
   <header><div class="kicker">RESULTS 2/2 — 聞こえる前</div><h2>検証 — 人の耳より先に気づけるか</h2></header>
   <div class="body">
     <figure>
@@ -339,7 +385,7 @@
 </section>
 
 <!-- 12 ablation -->
-<section class="slide" data-step="5">
+<section class="slide" data-step="6">
   <header><div class="kicker">NEXT 1/2</div><h2>今後の方針① — 物理ablationで問いに答える（9月）</h2></header>
   <div class="body">
     <p>動機：どの物理要因が、どの誤り（<strong>見逃し／誤通知／方向外れ</strong>）を生むのかを分離する。</p>
@@ -353,7 +399,7 @@
 </section>
 
 <!-- 13 実録 -->
-<section class="slide" data-step="5">
+<section class="slide" data-step="6">
   <header><div class="kicker">NEXT 2/2</div><h2>今後の方針② — 実録評価の測定方法（9月）</h2></header>
   <div class="body">
     <div class="cols c3">
@@ -372,7 +418,7 @@
 </section>
 
 <!-- 14 限界 -->
-<section class="slide" data-step="5">
+<section class="slide" data-step="6">
   <header><div class="kicker">LIMITATIONS</div><h2>正直な限界</h2></header>
   <div class="body">
     <ul class="pts">
@@ -388,7 +434,7 @@
 </section>
 
 <!-- 15 まとめ -->
-<section class="slide" data-step="5">
+<section class="slide" data-step="6">
   <header><div class="kicker">SUMMARY</div><h2>まとめ</h2></header>
   <div class="body">
     <ul class="pts" style="gap:20px">
@@ -455,7 +501,7 @@
 <script>
 (function(){
   const slides=[...document.querySelectorAll('.slide')];
-  const steps=['① 問い','② 空白','③ 土俵づくり','④ 検証','⑤ ablation'];
+  const steps=['背景・目的','基礎知識','関連研究','提案手法','検証','今後・まとめ'];
   slides.forEach((s,i)=>{
     const chips=s.querySelector('.chips'); const act=+s.dataset.step;
     if(chips && act>0){ steps.forEach((t,j)=>{const c=document.createElement('span');
