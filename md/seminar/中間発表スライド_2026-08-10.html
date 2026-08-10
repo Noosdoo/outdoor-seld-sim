@@ -1,0 +1,482 @@
+<title>SELDモデルを用いた難聴歩行者向け屋外危険音通知システムの構築 — 中間発表</title>
+<style>
+  :root{
+    --ink:#16233A; --ink2:#3A4658; --muted:#66707F;
+    --paper:#F7F7F3; --paper2:#EFEFEA; --hair:#D9DAD2;
+    --amber:#E8A200; --amber-deep:#B37E00;
+    --danger:#C4432B; --safe:#2F7D6D; --letter:#12161D;
+    --chip:#E4E5DE;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--letter); color:var(--ink);
+    font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Yu Gothic","Noto Sans JP","Meiryo",sans-serif;
+    font-feature-settings:"palt";
+    overflow:hidden;
+  }
+  .stage{position:absolute; left:50%; top:50%; width:1280px; height:720px; transform-origin:center; }
+  .slide{
+    position:absolute; inset:0; width:1280px; height:720px;
+    background:var(--paper); color:var(--ink);
+    display:none; flex-direction:column; padding:56px 72px 0;
+  }
+  .slide.on{display:flex}
+  .slide header{margin-bottom:26px}
+  .kicker{
+    font-size:15px; letter-spacing:.18em; color:var(--amber-deep);
+    font-weight:700; margin-bottom:10px; text-transform:uppercase;
+  }
+  h2{font-size:40px; font-weight:800; letter-spacing:.01em; text-wrap:balance; line-height:1.25}
+  .body{flex:1; min-height:0; display:flex; flex-direction:column; gap:18px}
+  p,li{font-size:21px; line-height:1.72; color:var(--ink2)}
+  strong{color:var(--ink); font-weight:800}
+  .em{color:var(--amber-deep); font-weight:800}
+  ul.pts{list-style:none; display:flex; flex-direction:column; gap:12px}
+  ul.pts>li{padding-left:26px; position:relative}
+  ul.pts>li::before{content:""; position:absolute; left:2px; top:14px; width:12px; height:12px; background:var(--ink); }
+  ul.pts>li.amber::before{background:var(--amber)}
+  ul.pts>li.sub{font-size:18px; color:var(--muted); padding-left:44px}
+  ul.pts>li.sub::before{width:8px;height:8px;left:22px;top:13px;background:var(--muted)}
+  .num{font-feature-settings:"tnum"; font-variant-numeric:tabular-nums}
+  .big{font-size:56px; font-weight:800; letter-spacing:-.01em; color:var(--ink); line-height:1.1}
+  .cols{display:grid; gap:24px}
+  .c2{grid-template-columns:1fr 1fr} .c3{grid-template-columns:1fr 1fr 1fr}
+  .card{background:#FFFFFF; border:1px solid var(--hair); padding:20px 22px}
+  .card h3{font-size:19px; font-weight:800; margin-bottom:8px; color:var(--ink)}
+  .card p, .card li{font-size:17.5px; line-height:1.6}
+  .tag{display:inline-block; font-size:13.5px; font-weight:800; letter-spacing:.08em;
+       padding:3px 10px; border:1.5px solid currentColor; margin-bottom:10px}
+  .tag.red{color:var(--danger)} .tag.grn{color:var(--safe)} .tag.amb{color:var(--amber-deep)} .tag.ink{color:var(--ink2)}
+  table{border-collapse:collapse; width:100%; background:#fff}
+  th,td{border:1px solid var(--hair); padding:10px 14px; font-size:18.5px; text-align:left; line-height:1.45}
+  th{background:var(--paper2); font-size:15.5px; letter-spacing:.05em; color:var(--ink2)}
+  td.ok{color:var(--safe); font-weight:800; text-align:center}
+  td.ng{color:var(--danger); font-weight:800; text-align:center}
+  td.num,th.num{text-align:right}
+  .stripe{height:10px; background:repeating-linear-gradient(-45deg, var(--amber) 0 16px, var(--ink) 16px 32px)}
+  .callout{border-left:6px solid var(--amber); background:#FFF; border-top:1px solid var(--hair);
+           border-right:1px solid var(--hair); border-bottom:1px solid var(--hair); padding:16px 20px}
+  .callout .t{font-weight:800; font-size:18px; margin-bottom:4px}
+  .callout p{font-size:17.5px}
+  figure{background:#fff; border:1px solid var(--hair); padding:14px 16px 8px}
+  figcaption{font-size:14.5px; color:var(--muted); margin-top:6px}
+  .slide footer{
+    height:64px; margin:0 -72px; padding:0 72px; display:flex; align-items:center; gap:10px;
+    border-top:1px solid var(--hair); color:var(--muted); font-size:14px;
+  }
+  .chips{display:flex; gap:8px; flex:1}
+  .chipStep{font-size:13.5px; padding:4px 12px; border-radius:99px; background:var(--chip); color:var(--muted); font-weight:600}
+  .chipStep.act{background:var(--ink); color:#fff}
+  .pageno{font-feature-settings:"tnum"}
+  /* 表紙 */
+  .cover{padding:0; background:var(--paper)}
+  .cover .top{height:96px; background:var(--ink); display:flex; align-items:center; padding:0 72px}
+  .cover .top span{color:#C8CEDA; letter-spacing:.22em; font-size:15px; font-weight:700}
+  .cover .mid{flex:1; padding:70px 72px 0; position:relative}
+  .cover h1{font-size:54px; font-weight:800; line-height:1.42; letter-spacing:.01em; max-width:900px; text-wrap:balance}
+  .cover .sub{margin-top:34px; font-size:22px; color:var(--ink2)}
+  .cover .sub b{font-size:26px; color:var(--ink)}
+  .waves{position:absolute; right:40px; top:40px}
+  .hud{position:fixed; right:16px; bottom:12px; color:#8892A0; font-size:12px; z-index:9;
+       font-family:Consolas,monospace}
+  @media (prefers-reduced-motion:no-preference){ .slide.on{animation:in .18s ease} }
+  @keyframes in{from{opacity:.4}to{opacity:1}}
+  @media print{
+    body{background:#fff; overflow:visible}
+    .stage{position:static; transform:none!important; width:auto; height:auto}
+    .slide{display:flex!important; position:relative; page-break-after:always; margin:0 auto}
+    .hud{display:none}
+  }
+</style>
+
+<div class="stage" id="stage">
+
+<!-- 1 表紙 -->
+<section class="slide cover" data-step="0">
+  <div class="top"><span>2026 夏ゼミ ・ 中間発表</span></div>
+  <div class="mid">
+    <svg class="waves" width="360" height="300" viewBox="0 0 360 300" role="img" aria-label="音源から広がる音の波紋">
+      <g fill="none" stroke="#16233A" stroke-opacity=".16" stroke-width="2">
+        <circle cx="300" cy="70" r="36"/><circle cx="300" cy="70" r="76"/>
+        <circle cx="300" cy="70" r="120"/><circle cx="300" cy="70" r="168"/>
+      </g>
+      <circle cx="300" cy="70" r="10" fill="#E8A200"/>
+    </svg>
+    <h1>SELDモデルを用いた<br>難聴歩行者向け屋外危険音<br>通知システムの構築</h1>
+    <div class="sub">B4　<b>松本 鋭</b></div>
+  </div>
+  <div class="stripe"></div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 2 道筋 -->
+<section class="slide" data-step="1">
+  <header><div class="kicker">RESEARCH ROADMAP</div>
+    <h2>本研究の問いと道筋</h2></header>
+  <div class="body">
+    <p>問い：屋外で「種類＋方向＋<strong>距離</strong>」を難聴者に届けるために、<strong>どの物理が必要なのか</strong>。</p>
+    <div class="cols" style="grid-template-columns:repeat(5,1fr); gap:14px">
+      <div class="card"><div class="tag ink">① 問い</div><p>どの物理が要るのか</p></div>
+      <div class="card"><div class="tag ink">② 空白</div><p>屋外の方向つきデータが存在しない</p></div>
+      <div class="card" style="border-color:var(--amber)"><div class="tag amb">③ 土俵づくり</div><p>物理を自作し誤差ゼロラベルの教科書を作る<br><strong>→ 8クラス・日本準拠に拡張</strong></p></div>
+      <div class="card" style="border-color:var(--amber)"><div class="tag amb">④ 検証</div><p>土俵が信用できるかを潰す<br><strong>→ 未使用セットで確定評価済み</strong></p></div>
+      <div class="card"><div class="tag ink">⑤ ablation</div><p>物理を1つずつ外して問いに答える<br><strong>→ 9月実施・計画確定</strong></p></div>
+    </div>
+    <p style="font-size:19px;color:var(--muted)">今回の進捗＝③の拡張と④の完了。⑤は実録評価と同じ土俵で行う。</p>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 3 研究背景 -->
+<section class="slide" data-step="1">
+  <header><div class="kicker">BACKGROUND</div><h2>研究背景 — 歩行者の安全は聴覚に支えられている</h2></header>
+  <div class="body">
+    <div class="cols c2" style="flex:1">
+      <ul class="pts">
+        <li>歩行者は接近車・サイレン・踏切などの<strong>危険察知を聴覚に依存</strong>している</li>
+        <li>難聴者はその情報が欠落し、屋外歩行の事故リスクが高い</li>
+        <li class="sub">イヤホン歩行者・高齢者にも共通する課題</li>
+        <li class="amber">機械の耳は人間の耳の限界（可聴域・可聴距離）に縛られない<br>→「耳の代わり」を超えて<span class="em">人の耳を超える支援</span>まで狙える</li>
+      </ul>
+      <figure>
+        <svg viewBox="0 0 420 300" style="max-width:100%;height:auto" role="img" aria-label="前方視野の外＝後方から車・キックボード・緊急車両が接近する俯瞰図">
+          <path d="M210 150 L130 30 A150 150 0 0 1 290 30 Z" fill="#16233A" fill-opacity=".08"/>
+          <text x="210" y="52" text-anchor="middle" font-size="13" fill="#66707F">前方視野</text>
+          <circle cx="210" cy="150" r="18" fill="#16233A"/>
+          <text x="210" y="188" text-anchor="middle" font-size="13" fill="#3A4658">ユーザー</text>
+          <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#C4432B"/></marker></defs>
+          <g stroke="#C4432B" stroke-width="3" marker-end="url(#ar)">
+            <line x1="60"  y1="270" x2="182" y2="172"/>
+            <line x1="210" y1="292" x2="210" y2="178"/>
+            <line x1="360" y1="270" x2="238" y2="172"/>
+          </g>
+          <text x="52"  y="290" text-anchor="middle" font-size="14" fill="#16233A" font-weight="700">緊急車両</text>
+          <text x="210" y="312" text-anchor="middle" font-size="14" fill="#16233A" font-weight="700">車・バイク</text>
+          <text x="368" y="290" text-anchor="middle" font-size="14" fill="#16233A" font-weight="700">キックボード</text>
+        </svg>
+        <figcaption>視覚の外（後方・側方）から接近する「音を発する動的な脅威」が対象</figcaption>
+      </figure>
+    </div>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 4 研究目的 -->
+<section class="slide" data-step="1">
+  <header><div class="kicker">OBJECTIVE</div><h2>研究目的 — 種類・方向・距離を、危険度に変えて届ける</h2></header>
+  <div class="body">
+    <div class="cols c3">
+      <div class="card"><h3>検出対象＝8クラス</h3>
+        <p>サイレン（救急・パト・消防）／クラクション／バック音／自転車ベル／車（<strong>EV・大型</strong>含む）／踏切＋列車／<strong>キックボード</strong>／<strong>バイク</strong></p></div>
+      <div class="card"><h3>伝え方</h3>
+        <p>音の<strong>種類・方向・距離</strong>を推定し、危険度3段階（至近警告／注意／抑制）を<strong>首元の振動</strong>で伝える。行動の判断は本人に委ねる</p></div>
+      <div class="card"><h3>前提</h3>
+        <p>視覚は健常と仮定。前方視野内の対象はスコープ外。第1対象は難聴者（イヤホン歩行者・高齢者へ拡張可能）</p></div>
+    </div>
+    <div class="callout"><div class="t">8/4からの拡張</div>
+      <p>クラス：6 → <strong>8</strong>（キックボード・バイク・列車を追加）／推定量：種類＋方向 → <strong>＋距離</strong>／音源仕様：<strong>日本の法規・省令・実測研究で出典を層別管理</strong></p></div>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 5 SELDとは -->
+<section class="slide" data-step="1">
+  <header><div class="kicker">PRELIMINARIES</div><h2>SELDとは — 画像でいう物体検出の、音・方向版</h2></header>
+  <div class="body">
+    <p><strong>SELD</strong>（Sound Event Localization and Detection）＝音の<strong>種類</strong>と<strong>時間</strong>と<strong>方向</strong>を、複数の音源について同時に当てるタスク。</p>
+    <div class="cols c2">
+      <figure>
+        <svg viewBox="0 0 440 180" style="max-width:100%;height:auto" role="img" aria-label="SED：どの時間に何が鳴っているかを帯で示すタイムライン">
+          <line x1="30" y1="150" x2="420" y2="150" stroke="#66707F" stroke-width="1.5"/>
+          <text x="425" y="154" font-size="12" fill="#66707F" text-anchor="end">時間 →</text>
+          <rect x="60"  y="30" width="150" height="26" fill="#C4432B" fill-opacity=".85"/><text x="66" y="48" font-size="13" fill="#fff">車</text>
+          <rect x="170" y="70" width="180" height="26" fill="#2F7D6D" fill-opacity=".85"/><text x="176" y="88" font-size="13" fill="#fff">サイレン</text>
+          <rect x="40"  y="110" width="120" height="26" fill="#16233A" fill-opacity=".85"/><text x="46" y="128" font-size="13" fill="#fff">自転車ベル</text>
+        </svg>
+        <figcaption>SED：「今、何が鳴っているか」（種類×時間）</figcaption>
+      </figure>
+      <figure>
+        <svg viewBox="0 0 440 180" style="max-width:100%;height:auto" role="img" aria-label="SSL：音がどの方位から来るかを矢印で示す俯瞰図">
+          <circle cx="220" cy="95" r="66" fill="none" stroke="#D9DAD2" stroke-width="1.5"/>
+          <circle cx="220" cy="95" r="8" fill="#16233A"/>
+          <defs><marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#E8A200"/></marker></defs>
+          <line x1="220" y1="95" x2="276" y2="52" stroke="#E8A200" stroke-width="4" marker-end="url(#ar2)"/>
+          <text x="292" y="44" font-size="14" fill="#B37E00" font-weight="700">右斜め前 30°</text>
+          <text x="220" y="30" text-anchor="middle" font-size="12" fill="#66707F">前</text>
+        </svg>
+        <figcaption>SSL：「どっちから鳴っているか」（方位・仰角）</figcaption>
+      </figure>
+    </div>
+    <p>本研究はここに<span class="em">音源距離推定（SDE）を拡張</span>し、種類＋方向＋<strong>距離</strong>の同時推定にする。</p>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 6 関連研究1 -->
+<section class="slide" data-step="1">
+  <header><div class="kicker">RELATED WORK 1/2</div><h2>PSELDNets（2024）— SELDの基盤モデル</h2></header>
+  <div class="body">
+    <ul class="pts">
+      <li>大規模合成データで事前学習した<strong>SELD基盤モデル</strong>（1,167時間・170クラス、主要3データセットでSOTA）</li>
+      <li>省データ適応手法 AdapterBit を導入</li>
+      <li>出力は multi-ACCDOA（同一クラスの音を最大3つまで同時検出）</li>
+      <li class="amber">本研究は、この基盤に<span class="em">距離推定ヘッドを拡張</span>し、屋外・移動音源・8クラスへ応用する</li>
+    </ul>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 7 関連研究2 -->
+<section class="slide" data-step="2">
+  <header><div class="kicker">RELATED WORK 2/2</div><h2>DynamicSound（2026）— 屋外音響の物理シミュレータ</h2></header>
+  <div class="body">
+    <ul class="pts">
+      <li>室内RIRツールの限界を屋外向けに解いたオープンソース</li>
+      <li>自由音場・任意マイクアレイ・音源の連続3D移動</li>
+      <li>屋外物理を明示的にモデル化：伝搬遅延・ドップラー・距離減衰・大気吸収・一次反射</li>
+    </ul>
+    <div class="callout"><div class="t">それでも残る空白＝本研究の位置</div>
+      <p><strong>歩行者装着 × 複数危険クラス同時 × 距離まで</strong>を屋外で扱った研究は存在しない。分業型（分類CNN＋信号処理DOA）は複数音源の同時発生で「種類と方向の対応付け」が壊れる → 同時推定型SELDを採用する。</p></div>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 8 提案手法1 -->
+<section class="slide" data-step="3">
+  <header><div class="kicker">PROPOSED METHOD 1/2</div><h2>提案手法 — 合成データで学習を成立させる</h2></header>
+  <div class="body">
+    <div class="cols c3">
+      <div class="card"><h3>物理シミュレーション</h3><p>伝搬遅延／ドップラー／距離減衰／大気吸収／地面反射を自作実装（物理検証済み）</p></div>
+      <div class="card"><h3>4ch音＋方向・距離ラベル</h3><p>同一経路から同時に出力（FOA）。ラベル誤差ゼロの「教科書」</p></div>
+      <div class="card"><h3>学習・評価</h3><p>PSELDNetsをファインチューニング。<span class="num">学習10,200＋確定評価1,800クリップ</span></p></div>
+    </div>
+    <ul class="pts">
+      <li>なぜ合成か：① 屋外の方向つきデータが他に存在しない　② 物理を自分で持てば1つずつ外せる＝<strong>ablationができる土俵</strong>になる</li>
+      <li>音源の音量・周波数は<strong>日本の法規・省令・実測研究で出典を層別管理</strong>（規則値と設計値を混同しない）</li>
+      <li class="amber">空間手がかりが理想的過ぎる限界 → <span class="em">9月に実録で検証</span>（測定方法は後述）</li>
+    </ul>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 9 提案手法2 -->
+<section class="slide" data-step="3">
+  <header><div class="kicker">PROPOSED METHOD 2/2</div><h2>2層の仕組み — 推定距離で「いつ・どの強さで」を決める</h2></header>
+  <div class="body" style="flex-direction:row; gap:36px">
+    <div style="flex:1.1; display:flex; flex-direction:column; gap:14px">
+      <div class="card"><h3>知覚層（SELD＋SDE）</h3><p>8クラスの検出・方向・<strong>距離</strong>を0.1秒ごとに推定</p></div>
+      <div style="text-align:center;color:var(--muted)">▼</div>
+      <div class="card" style="border-color:var(--amber)"><h3>通知層（3役割）</h3>
+        <p><span class="tag red">至近警告</span> 推定距離≤1.5mが2フレーム連続（同一物体の方位連続性つき）<br>
+           <span class="tag amb">注意</span> ≤3.0m　<span class="tag grn">抑制</span> &gt;3.2m＝安全な車は鳴らさない</p></div>
+      <div style="text-align:center;color:var(--muted)">▼</div>
+      <div class="card" style="border-style:dashed"><h3>首元振動デバイス（今後）</h3><p>方向×振動でユーザに伝える</p></div>
+    </div>
+    <figure style="flex:1">
+      <svg viewBox="0 0 420 330" style="max-width:100%;height:auto" role="img" aria-label="歩行者を中心に1.5m・3.0mの距離リングで至近警告・注意・抑制を出し分ける図">
+        <circle cx="210" cy="170" r="150" fill="#2F7D6D" fill-opacity=".10"/>
+        <circle cx="210" cy="170" r="96"  fill="#E8A200" fill-opacity=".18"/>
+        <circle cx="210" cy="170" r="48"  fill="#C4432B" fill-opacity=".22"/>
+        <g fill="none" stroke-width="2">
+          <circle cx="210" cy="170" r="48" stroke="#C4432B"/>
+          <circle cx="210" cy="170" r="96" stroke="#B37E00"/>
+          <circle cx="210" cy="170" r="150" stroke="#2F7D6D" stroke-dasharray="6 5"/>
+        </g>
+        <circle cx="210" cy="170" r="9" fill="#16233A"/>
+        <text x="210" y="132" text-anchor="middle" font-size="14" font-weight="800" fill="#C4432B">≤1.5m 至近警告</text>
+        <text x="210" y="84"  text-anchor="middle" font-size="14" font-weight="800" fill="#B37E00">≤3.0m 注意</text>
+        <text x="210" y="34"  text-anchor="middle" font-size="14" font-weight="800" fill="#2F7D6D">&gt;3.2m 抑制</text>
+        <text x="210" y="320" text-anchor="middle" font-size="13.5" fill="#66707F">全部鳴らすと使えない → 通知の頻度そのものを設計対象にする</text>
+      </svg>
+      <figcaption>8/4時点は危険度を区別できなかった → 距離推定の統合で3段階が機能（今回の最大の進捗）</figcaption>
+    </figure>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 10 検証1 -->
+<section class="slide" data-step="4">
+  <header><div class="kicker">RESULTS 1/2 — 確定評価</div><h2>検証 — 事前固定した未使用セットでの一発評価</h2></header>
+  <div class="body">
+    <p style="font-size:19px">作法：合格基準を<strong>先に宣言</strong> → <strong>未使用の評価セット1,800本</strong>を新規生成 → <strong>1回だけ</strong>推論・採点（答案を見てから基準を変えられない形）。AI外部監査（敵対的レビュー3巡）で<span class="em">完全合格</span>。</p>
+    <table>
+      <tr><th style="width:120px">ゲート</th><th>事前宣言した基準</th><th>確定値</th><th style="width:80px">判定</th></tr>
+      <tr><td><b>G1</b> 基本</td><td>車 ≥99%・方向 ≤3.0°</td><td class="num"><b>99.4%</b> ／ 2.0°</td><td class="ok">達成</td></tr>
+      <tr><td><b>G2</b> 静音EV</td><td>単独EV ≥95%</td><td class="num"><b>99.0%</b>（前世代80.2%から<b>+19pt</b>）</td><td class="ok">達成</td></tr>
+      <tr><td><b>G3</b> 新クラス</td><td>バイク≥90／踏切列車≥99／キック≥60</td><td class="num">99.8 ／ 100.0 ／ 97.3%</td><td class="ok">達成</td></tr>
+      <tr><td><b>G4</b> 距離</td><td>至近中央 ≤0.30m・重大判定 ≥68%</td><td class="num"><b>0.21m</b> ／ 69.0%</td><td class="ok">達成</td></tr>
+      <tr><td><b>G5</b> 総合</td><td>SELDスコア ≤0.085</td><td class="num">0.087（学習時指標）</td><td class="ng">未達</td></tr>
+    </table>
+    <p style="font-size:18px;color:var(--muted)">8クラス可聴検出率 97.2〜100%。未達も隠さず記載するのが本研究の検証の作法。</p>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 11 検証2 -->
+<section class="slide" data-step="4">
+  <header><div class="kicker">RESULTS 2/2 — 聞こえる前</div><h2>検証 — 人の耳より先に気づけるか</h2></header>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 1080 150" style="max-width:100%;height:auto" role="img" aria-label="サイレンの初検知距離：中央208m、90パーセンタイル279m、最大303mを距離軸上に示す">
+        <line x1="60" y1="100" x2="1040" y2="100" stroke="#16233A" stroke-width="2"/>
+        <g stroke="#66707F" stroke-width="1"><line x1="60" y1="94" x2="60" y2="106"/><line x1="386" y1="94" x2="386" y2="106"/><line x1="713" y1="94" x2="713" y2="106"/><line x1="1040" y1="94" x2="1040" y2="106"/></g>
+        <g font-size="13" fill="#66707F" text-anchor="middle"><text x="60" y="126">0m</text><text x="386" y="126">100m</text><text x="713" y="126">200m</text><text x="1040" y="126">300m</text></g>
+        <circle cx="60" cy="100" r="8" fill="#16233A"/><text x="60" y="80" text-anchor="middle" font-size="13" fill="#3A4658">歩行者</text>
+        <g><line x1="739" y1="100" x2="739" y2="46" stroke="#C4432B" stroke-width="3"/><text x="739" y="36" text-anchor="middle" font-size="17" font-weight="800" fill="#C4432B">中央 208m</text></g>
+        <g><line x1="971" y1="100" x2="971" y2="58" stroke="#B37E00" stroke-width="2.5"/><text x="971" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#B37E00">p90 279m</text></g>
+        <g><line x1="1049" y1="100" x2="1049" y2="76" stroke="#66707F" stroke-width="2"/><text x="1030" y="70" text-anchor="middle" font-size="13" fill="#66707F">最大 303m</text></g>
+      </svg>
+      <figcaption>サイレン初検知距離（100〜300m遠方配置・未検知ゼロ・確定評価）—「人が気づく前から機械の耳は聞いている」を距離で定量化</figcaption>
+    </figure>
+    <div class="cols c3">
+      <div class="card"><h3>通知層（確定評価）</h3><p class="num">重大車への至近警告到達 <b>69.9%</b><br>安全車の抑制 <b>90.4%</b>・誤警告 1.3%</p></div>
+      <div class="card"><h3>静音の脅威にも</h3><p class="num">キックボード 至近警告到達 <b>88.7%</b></p></div>
+      <div class="card"><h3>可聴域の外へ</h3><p class="num"><b>40kHz超音波</b>の検出系を初実装（静穏環境で10m先まで検出）</p></div>
+    </div>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 12 ablation -->
+<section class="slide" data-step="5">
+  <header><div class="kicker">NEXT 1/2</div><h2>今後の方針① — 物理ablationで問いに答える（9月）</h2></header>
+  <div class="body">
+    <p>動機：どの物理要因が、どの誤り（<strong>見逃し／誤通知／方向外れ</strong>）を生むのかを分離する。</p>
+    <div class="cols c3">
+      <div class="card"><h3>規模</h3><p>物理を1つだけ外した版 ×4<br>（ドップラー・大気吸収・幾何減衰・地面反射）</p></div>
+      <div class="card"><h3>測り方</h3><p>各版を<strong>全物理の確定評価セット＋実録60本</strong>の共通土俵で採点 → 落ちた分＝その物理の大事さ</p></div>
+      <div class="card"><h3>準備状況</h3><p>学習レシピ・採点系・評価セットは確定済み（計画第5版）。<strong>9月に実録と同じ土俵で実施</strong></p></div>
+    </div>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 13 実録 -->
+<section class="slide" data-step="5">
+  <header><div class="kicker">NEXT 2/2</div><h2>今後の方針② — 実録評価の測定方法（9月）</h2></header>
+  <div class="body">
+    <div class="cols c3">
+      <div class="card"><div class="tag ink">① 統制録音</div><p>車（速度×横距離を散らす）・EV・キックボード・踏切＋列車。台本どおり幾何を合成シナリオに揃える</p></div>
+      <div class="card"><div class="tag amb">② 機会捕捉</div><p>サイレン・クラクション・バック音。<strong>遭遇したら他を中断して最優先記録</strong></p></div>
+      <div class="card"><div class="tag grn">③ 負例</div><p>静穏・繁華街・風。誤警告率／時の実世界試験</p></div>
+    </div>
+    <ul class="pts">
+      <li>機材：4ch FOAマイク（Zoom H3-VR）・96kHz・風防。テイク前に方位校正音＋騒音計LAeqを記録</li>
+      <li>注釈（車種・目視速度・横距離・風速・LAeq）を正解として<strong>合成と同一の採点系</strong>で比較（計65本）</li>
+    </ul>
+    <div class="callout"><div class="t">サイレンはスピーカ再生で測らない（設計判断）</div>
+      <p>緊急車両との誤認リスクに加え、規定音圧90–120dB@20mに市販スピーカでは届かず「近くの偽物」を測ることになる → <strong>機会捕捉が正しい測定法</strong></p></div>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 14 限界 -->
+<section class="slide" data-step="5">
+  <header><div class="kicker">LIMITATIONS</div><h2>正直な限界</h2></header>
+  <div class="body">
+    <ul class="pts">
+      <li><span class="tag ink">実録</span> 実環境は未検証（9月に測定）。合成の空間手がかりは理想的過ぎる可能性</li>
+      <li><span class="tag ink">指標</span> 総合SELDスコアは事前基準に僅差未達（0.087 vs 0.085。個別性能は全達成）</li>
+      <li><span class="tag ink">通知</span> 至近警告の到達は約7割。未達の主因は距離推定が2フレーム連続で1.5mに届かないケース（個票監査で全数分類済み・安全車への誤帰属はほぼ無し）</li>
+      <li><span class="tag ink">学習</span> キックボードの高騒音下検出は88.7% — 距離重視の学習とのトレードオフが残る</li>
+      <li><span class="tag ink">設計</span> 通知の同一物体判定は方位連結による近似（完全なトラッキングは将来課題）</li>
+    </ul>
+    <p style="color:var(--muted);font-size:18px">限界も「どのケースが・何台・なぜ」まで個票レベルで分解できているのが現在の状態。</p>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 15 まとめ -->
+<section class="slide" data-step="5">
+  <header><div class="kicker">SUMMARY</div><h2>まとめ</h2></header>
+  <div class="body">
+    <ul class="pts" style="gap:20px">
+      <li>8クラス・<strong>距離つき</strong>屋外SELDを日本準拠の合成データで構築し、<strong>事前固定の未使用セットで確定評価</strong>（ゲート4/5達成・AI外部監査 完全合格）</li>
+      <li>通知層が<strong>推定距離で3段階</strong>に出し分け — 至近警告到達 <span class="num"><b>69.9%</b></span>・安全車の抑制 <span class="num"><b>90.4%</b></span>・キックボード <span class="num"><b>88.7%</b></span></li>
+      <li>「聞こえる前」を定量化 — サイレン初検知 <span class="big num" style="font-size:40px">208m</span>・40kHz超音波検出も初実装</li>
+      <li>次：<strong>9月の実録評価</strong>（測定方法確定済み）と<strong>物理ablation</strong>で「どの物理が必要か」に答える</li>
+    </ul>
+    <div class="stripe" style="margin:8px -72px 0"></div>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 16 参考文献 -->
+<section class="slide" data-step="0">
+  <header><div class="kicker">REFERENCES</div><h2>参考文献</h2></header>
+  <div class="body">
+    <ul class="pts" style="gap:8px">
+      <li class="sub" style="padding-left:26px">[1] J. Hu et al., "PSELDNets: Pre-trained Neural Networks on Large-scale Synthetic Datasets for Sound Event Localization and Detection," arXiv:2411.06399, 2024.</li>
+      <li class="sub" style="padding-left:26px">[2] L. Barbisan et al., "DynamicSound simulator for simulating moving sources and microphone arrays," arXiv:2601.15433, 2026.</li>
+      <li class="sub" style="padding-left:26px">[3] E. Fonseca et al., "FSD50K: An Open Dataset of Human-Labeled Sound Events," IEEE/ACM TASLP, 2022.</li>
+      <li class="sub" style="padding-left:26px">[4] K. Shimada et al., "Ensemble of ACCDOA- and EINV2-based Systems…," DCASE2021 Challenge, 2021.</li>
+      <li class="sub" style="padding-left:26px">[5] Q. Wang et al., "A Four-Stage Data Augmentation Approach to ResNet-Conformer Based Acoustic Modeling…," IEEE/ACM TASLP, 2023.</li>
+      <li class="sub" style="padding-left:26px">[6] DCASE2024 Challenge Task 3: Sound Event Localization and Detection with Source Distance Estimation.</li>
+    </ul>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 17 付録: 指標 -->
+<section class="slide" data-step="0">
+  <header><div class="kicker">APPENDIX A</div><h2>付録 — 評価指標</h2></header>
+  <div class="body">
+    <table>
+      <tr><th style="width:200px">指標</th><th>意味</th></tr>
+      <tr><td>ER ↓</td><td>検出のミス率：正解と比べて何割ミスがあるか</td></tr>
+      <tr><td>F値 ↑</td><td>検出の正確さ：誤検出の少なさと見逃しの少なさのバランス</td></tr>
+      <tr><td>LE<sub>CD</sub> ↓</td><td>定位の誤差：正解と比べて何度ズレているか</td></tr>
+      <tr><td>LR<sub>CD</sub> ↑</td><td>定位の検出率：方向まで含めて正確に検出できた割合</td></tr>
+      <tr><td>SELDスコア ↓</td><td>上記4つの統合：{ ER＋(1−F)＋LE/180＋(1−LR) } / 4</td></tr>
+    </table>
+    <p style="font-size:18px;color:var(--muted)">距離・通知は別指標：至近≤5mの中央絶対誤差／危険度3段階の到達・抑制・誤警告率（車＝トラック単位）。</p>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+<!-- 18 付録: 確定評価 -->
+<section class="slide" data-step="0">
+  <header><div class="kicker">APPENDIX B</div><h2>付録 — 確定評価と外部監査の仕組み</h2></header>
+  <div class="body">
+    <ul class="pts">
+      <li><strong>確定評価セット</strong>：検証セットと同一設計・新乱数・未使用フォールドの1,800本。<strong>生成前に計画をコミット</strong>（事前登録）し、推論・採点は1回だけ</li>
+      <li>開発値と確定値の乖離は全指標±2pt以内 ＝ 過学習ではなく汎化している直接証拠</li>
+      <li><strong>AI外部監査</strong>：別のAI（監査役）による敵対的レビュー。不合格指摘 → 全対応 → 再検証3巡 → 完全合格。指摘には通知ルールの欠陥発見（同一物体の連続性）も含まれ、ルール改訂の契機になった</li>
+      <li>失敗ケースは<strong>個票監査</strong>で全数分類（至近警告に届かなかった重大車153台の内訳まで記録）</li>
+    </ul>
+  </div>
+  <footer><div class="chips"></div><span class="pageno"></span></footer>
+</section>
+
+</div>
+<div class="hud" id="hud"></div>
+
+<script>
+(function(){
+  const slides=[...document.querySelectorAll('.slide')];
+  const steps=['① 問い','② 空白','③ 土俵づくり','④ 検証','⑤ ablation'];
+  slides.forEach((s,i)=>{
+    const chips=s.querySelector('.chips'); const act=+s.dataset.step;
+    if(chips && act>0){ steps.forEach((t,j)=>{const c=document.createElement('span');
+      c.className='chipStep'+(j+1===act?' act':''); c.textContent=t; chips.appendChild(c);});}
+    const pn=s.querySelector('.pageno'); if(pn) pn.textContent=(i+1)+' / '+slides.length;
+  });
+  let cur=Math.min(Math.max((parseInt(location.hash.slice(1))||1)-1,0),slides.length-1);
+  function show(n){cur=Math.min(Math.max(n,0),slides.length-1);
+    slides.forEach((s,i)=>s.classList.toggle('on',i===cur));
+    location.replace('#'+(cur+1));
+    document.getElementById('hud').textContent=(cur+1)+'/'+slides.length+'  ←→で移動・印刷でPDF';}
+  function fit(){const s=Math.min(innerWidth/1280,innerHeight/720);
+    const st=document.getElementById('stage');
+    st.style.transform='translate(-50%,-50%) scale('+s+')';}
+  addEventListener('resize',fit);
+  addEventListener('keydown',e=>{
+    if(['ArrowRight','PageDown',' '].includes(e.key)){show(cur+1);e.preventDefault();}
+    if(['ArrowLeft','PageUp'].includes(e.key)){show(cur-1);e.preventDefault();}
+    if(e.key==='Home')show(0); if(e.key==='End')show(slides.length-1);});
+  addEventListener('click',e=>{if(e.target.closest('a'))return;
+    show(e.clientX>innerWidth/2?cur+1:cur-1);});
+  fit();show(cur);
+})();
+</script>
