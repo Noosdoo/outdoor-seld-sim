@@ -146,6 +146,8 @@ def main():
     v1_notified = defaultdict(int)
     v1_to_silent = defaultdict(int)
     esc_lead = []
+    b2_dump = bool(os.environ.get("B2_DUMP"))   # Sol残条件②: B2個票監査
+    b2_rows = []
     n_fire_unattr = 0
     n_trig_false = {"強": 0, "中": 0}      # 車なしクリップの誤発火(clip数)
     ep_cls = {"強": defaultdict(int), "中": defaultdict(int)}  # 帰属不能episode分類
@@ -215,9 +217,12 @@ def main():
                 best[tr] = role
 
         unattr = {"強": [], "中": []}
+        strong_attrib = []                 # (frame, az, 帰属先track or None)
         for lv, upgrade in (("中", "中"), ("強", "強")):
             for j, a in trig[lv]:
                 tr = attribute(j, a)
+                if lv == "強":
+                    strong_attrib.append((j, a, tr))
                 if tr is None:
                     unattr[lv].append((j, a))
                     continue
@@ -247,6 +252,51 @@ def main():
                 conf[(gt_tier, best[tr])] += 1
                 if fired_v1[tr] and best[tr] == "抑制":
                     v1_to_silent[gt_tier] += 1
+            # --- B2個票（Sol残条件②）: 重大かつ強未達のトラックを全数分類 ---
+            if b2_dump and gt_tier == "重大" and best[tr] != "強":
+                F = set(gt.keys())
+                in_f = [(j, a, t2) for (j, a, t2) in strong_attrib if j in F]
+                out_f = [x for x in strong_attrib if x[0] not in F]
+                row = {"clip": clip, "track": tr, "category": "",
+                       "frame": "", "trig_az": "", "own_az": "",
+                       "own_azdiff": "", "other_track": "", "other_dist": "",
+                       "verdict": ""}
+                if not in_f:
+                    row["category"] = ("B3(自GT行なしフレームのみで発火)"
+                                       if out_f else "A(強トリガ未成立)")
+                else:
+                    done = False
+                    for j, a, t2 in in_f:            # B1を優先判定
+                        dd_own = cdiff(a, gt[j][0])
+                        if t2 is not None and dd_own <= AZ_MATCH:
+                            row.update(category="B1(±25°内で最近傍負け)",
+                                       frame=j, trig_az=f"{a:.0f}",
+                                       own_az=f"{gt[j][0]:.0f}",
+                                       own_azdiff=f"{dd_own:.1f}",
+                                       other_track=t2)
+                            done = True
+                            break
+                    if not done:
+                        for j, a, t2 in in_f:        # B2
+                            if t2 is None:
+                                continue
+                            dd_own = cdiff(a, gt[j][0])
+                            d2 = gt_tracks[t2].get(j, (None, 99.0))[1]
+                            verdict = ("正当(他所に実在の重大車)" if d2 <= T3
+                                       else "スチール(他車は安全域)"
+                                       if d2 > SUPP else "中間(他車は注意域)")
+                            row.update(category="B2(他車帰属)", frame=j,
+                                       trig_az=f"{a:.0f}",
+                                       own_az=f"{gt[j][0]:.0f}",
+                                       own_azdiff=f"{dd_own:.1f}",
+                                       other_track=t2,
+                                       other_dist=f"{d2:.2f}",
+                                       verdict=verdict)
+                            done = True
+                            break
+                    if not done:
+                        row["category"] = "帰属不能トリガのみ(episode監査対象)"
+                b2_rows.append(row)
 
     R = ["# 通知層v3.3（Sol再監査対応版）採点", "",
          f"対象クリップ: {len(clips):,}本（manifest基準・予測ゼロ{n_nopred_clips}本を含む）。",
@@ -300,6 +350,29 @@ def main():
     R += ["", "※「GT行なし」はその時間帯に可聴GT車行が無いこと（不可聴車の実在は"
           "否定できない=ラベル宇宙の定義に依存）。",
           "※分母は車(トラック)単位・manifest基準。v3.2以前とは分母が異なる。"]
+
+    if b2_dump:
+        import csv as _csv
+        with open(OUT / "b2_casebook.csv", "w", newline="",
+                  encoding="utf-8") as f:
+            w = _csv.DictWriter(f, fieldnames=[
+                "clip", "track", "category", "frame", "trig_az", "own_az",
+                "own_azdiff", "other_track", "other_dist", "verdict"])
+            w.writeheader()
+            w.writerows(b2_rows)
+        cats = defaultdict(int)
+        verd = defaultdict(int)
+        for r in b2_rows:
+            cats[r["category"]] += 1
+            if r["category"].startswith("B2"):
+                verd[r["verdict"]] += 1
+        R += ["", "## B2個票監査（強未達の重大車の全数分類・Sol残条件②）",
+              f"- 対象: {len(b2_rows)}台（個票= b2_casebook.csv）"]
+        for c in sorted(cats):
+            R.append(f"- {c}: {cats[c]}台")
+        if verd:
+            R.append("- B2内訳: " + " / ".join(
+                f"{k} {v}台" for k, v in sorted(verd.items())))
     (OUT / "notify_v33.md").write_text("\n".join(R) + "\n", encoding="utf-8")
     print("\n".join(R))
 
