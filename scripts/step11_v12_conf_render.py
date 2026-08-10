@@ -18,6 +18,7 @@ import step11_v12_render as m12  # noqa: E402
 m9 = m12.m9
 DS = ROOT / "out" / "dataset_outdoor_siren_v12_conf"
 m9.DS = DS
+m9.WORK = DS / "work"   # scene.jsonはm9.WORK定数経由（job421の失敗原因=これの欠落）
 for sub in ("foa", "metadata", "masks", "work"):
     (DS / sub).mkdir(parents=True, exist_ok=True)
 
