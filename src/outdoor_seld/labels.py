@@ -54,7 +54,10 @@ def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
         t_nd = t_frames - delay_ref
         active &= np.isfinite(t_nd) & (t_nd >= source_active_from)
         if source_active_until is not None:
-            active &= t_nd <= source_active_until
+            # 終了側は半開区間 [t_on, t_off)。音声側の窓（step11 _window:
+            # env[i0:i1]=1, i1=int(t_off*FS)）と同一規約（第9回監査指摘の統一）。
+            # 既定分岐(te<=)は既存凍結挙動のため触らない。
+            active &= t_nd < source_active_until
     else:
         active &= te >= source_active_from   # 発音開始前に発射された音は無視（v3のスパース発音用）
         if source_active_until is not None:

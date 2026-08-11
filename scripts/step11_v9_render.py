@@ -820,6 +820,9 @@ def generate_clip(row: dict) -> None:
                   "gen_seconds": round(time.perf_counter() - t_start, 1)}
     if ablate.MODE:
         s["ablate"] = ablate.MODE   # 来歴: どの物理を外した生成かをsceneに残す
+        # 第9回監査[低]対応: recv_pred_db等の事前予測診断値はfull物理式のまま
+        # （レンダ実体はABLATEに従う）。診断値を条件別に読み替えないこと。
+        s["ablate_note"] = "recv_pred_db等の予測診断はfull物理式のまま"
     (wdir / "scene.json").write_text(json.dumps(s, indent=2, default=str))
     srcs = "+".join(x["class"] for x in s["sources"]) or "none"
     print(f"[gen] {name} {row['motion']} tier={row['danger_tier']} {srcs} "
