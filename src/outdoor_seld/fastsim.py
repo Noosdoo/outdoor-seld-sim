@@ -29,6 +29,40 @@ from .geometry import (receiver_positions_at, solve_emission_times,
 FIR_LEN = 513  # DynamicSound と同一（大気吸収フィルタのタップ数）
 
 
+def _nodop_ref_from(te, ps_te):
+    """no-doppler規約の参照点（中央放射時刻の音源位置）。解が無ければNone。"""
+    finite = np.isfinite(te)
+    if not np.any(finite):
+        return None
+    te_ref = float(np.median(te[finite]))
+    i_ref = int(np.argmin(np.abs(np.where(finite, te, np.inf) - te_ref)))
+    return ps_te[i_ref]
+
+
+def nodop_delay(tr_query, waypoints, mic_pos, fs, clip_len_sec,
+                c=None, temperature_c: float = 20.0):
+    """no-doppler規約の読み出し遅延 delay_ref(tr) を返す（render_monoと同一規約）。
+
+    ラベル生成（labels.py）がこの関数を使うことで、音声のドライ読み出し
+    dry(tr − delay_ref) と発音区間判定の時刻規約が厳密に一致する。
+    参照点は render_mono と同じく音声サンプル格子（fs）上の放射時刻から選ぶ。
+    """
+    if c is None:
+        c = sound_speed(temperature_c)
+    n = int(round(clip_len_sec * fs))
+    tr = np.arange(n) / fs
+    mic = np.asarray(mic_pos, dtype=np.float64)
+    te, ps_te = solve_emission_times(tr, np.asarray(waypoints, np.float64),
+                                     mic, c)
+    ps_ref = _nodop_ref_from(te, ps_te)
+    tr_query = np.asarray(tr_query, dtype=np.float64)
+    if ps_ref is None:
+        return np.full(tr_query.shape, np.nan)
+    mic_at = (receiver_positions_at(tr_query, mic) if mic.ndim == 2
+              else np.broadcast_to(mic, tr_query.shape + (3,)))
+    return np.linalg.norm(mic_at - ps_ref[None, :], axis=1) / c
+
+
 def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
                 clip_len_sec: float, temperature_c: float = 20.0,
                 pressure_atm: float = 1.0, rel_humidity: float = 50.0,
@@ -88,11 +122,8 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
         # マイクが動けば遅延は時変のまま＝観測者ドップラーは物理どおり残る。
         # 静止マイクでは一定遅延（旧実装の中央値遅延と同種）に退化する。
         # 振幅1/r・吸収は下の③④で従来どおり実距離の時変のまま
-        finite = np.isfinite(te)
-        if np.any(finite):
-            te_ref = float(np.median(te[finite]))
-            i_ref = int(np.argmin(np.abs(np.where(finite, te, np.inf) - te_ref)))
-            ps_ref = ps_te[i_ref]
+        ps_ref = _nodop_ref_from(te, ps_te)   # ラベル側(nodop_delay)と共通の参照点
+        if ps_ref is not None:
             mic_at = (receiver_positions_at(tr, mic) if mic.ndim == 2
                       else np.broadcast_to(mic, (n, 3)))
             delay_ref = np.linalg.norm(mic_at - ps_ref[None, :], axis=1) / c

@@ -2247,3 +2247,11 @@ scratchpad/check1-5.py）
 - 骨子・ClaudeDesignプロンプトを確定値に格上げ済み（recall97.2-100%・EV99.0%・
   至近0.21m・69.9%/90.4%/1.3%・キック88.7%。far300 208mは評価専用セット表記のまま）
 - 残todo: ClaudeDesignスライドの数値チェック・練習8/25・夏ゼミ8/29-9/1・9月実録
+
+## ablation準備の実装完了（2026-08-11 19:00、実録以外の土俵が完備）
+
+- ABLATE環境変数スイッチ（src/outdoor_seld/ablate.py）: レンダとラベルが同一値参照
+- no_dopplerラベル規約（v4版P1教訓の実装消化）: fastsim.nodop_delayを単一の正に
+- スモーク全PASS（scripts/_ablate_smoke.py）: **既定経路は確定評価セット実物と
+  ビット一致**＝凍結データ無傷を証明。4条件生成OK・非ゲート行不変・ndのみ規約移動
+- 残ピース=実録60本のみ。ablation本番は引き続き指示待ち（実行しない）

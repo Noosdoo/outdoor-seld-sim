@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import ablate
 from .geometry import SOUND_SPEED_20C, apparent_azel_deg
 
 
@@ -42,9 +43,22 @@ def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
     az, el, te, dist = apparent_azel_deg(t_frames, waypoints, receiver_pos, c)
 
     active = np.isfinite(az)                 # 音がまだ届いていない(NaN)フレームは除外
-    active &= te >= source_active_from       # 発音開始前に発射された音は無視（v3のスパース発音用）
-    if source_active_until is not None:
-        active &= te <= source_active_until  # 発音終了後に発射された音も無視
+    if ablate.MODE == "no_doppler":
+        # 【ablation第5版・P1規約】no_dopplerの音声は dry(tr − delay_ref) の
+        # 一定遅延読み出しなので、発音区間の判定も同じ規約で行う。
+        # 方向・距離の値は放射時刻ベースのまま（FOAエンコードと同一経路）で、
+        # 変わるのは「どのフレームに行があるか」だけ。
+        from .fastsim import nodop_delay
+        delay_ref = nodop_delay(t_frames, waypoints, receiver_pos,
+                                ablate.NODOP_FS, clip_len_sec, c=c)
+        t_nd = t_frames - delay_ref
+        active &= np.isfinite(t_nd) & (t_nd >= source_active_from)
+        if source_active_until is not None:
+            active &= t_nd <= source_active_until
+    else:
+        active &= te >= source_active_from   # 発音開始前に発射された音は無視（v3のスパース発音用）
+        if source_active_until is not None:
+            active &= te <= source_active_until  # 発音終了後に発射された音も無視
 
     rows = []
     for k in range(n_frames):

@@ -43,6 +43,7 @@ from outdoor_seld.alert_sounds import (make_backup_beep, make_bike_bell,  # noqa
                                        make_crossing_v2, make_horn)
 from outdoor_seld.calibration import (K_RMS_SPL, frame_spl_a,  # noqa: E402
                                       gain_for_spl_a, spl_a)
+from outdoor_seld import ablate  # noqa: E402  (物理ablationスイッチ・第5版)
 from outdoor_seld.engine import make_car_v9  # noqa: E402
 from outdoor_seld.fastsim import render_mono  # noqa: E402
 from outdoor_seld.foa import encode_foa_timevarying, intensity_vector_doa  # noqa: E402
@@ -102,6 +103,9 @@ WORK = DS / "work"
 CLS_SRC = ROOT / "configs" / "cls_indices_v9.tsv"
 
 FS_SIM, FS_OUT = 48000, 24000
+ablate.NODOP_FS = FS_SIM   # no_dopplerのラベル側参照点をレンダと同一グリッドに固定
+if ablate.MODE:
+    print(f"[ablate] 物理スイッチ有効: {ablate.MODE}")
 CLIP = 10.0
 MIC_STATIC = (0.0, 0.0, 1.5)
 GROUND_Z = 0.0
@@ -671,19 +675,22 @@ def _render_stem(dry_cal: np.ndarray, wp: np.ndarray, mic, c: float):
     tr = np.arange(n24) / FS_OUT
     mic_arr = np.asarray(mic, dtype=np.float64)
     foas = {}
-    for tag in ("direct", "mirror"):
+    tags = ("direct", "mirror") if ablate.ground_enabled() else ("direct",)
+    for tag in tags:
         w = wp.copy()
         if tag == "mirror":
             w[:, 3] = 2.0 * GROUND_Z - w[:, 3]
         mono48 = render_mono(dry_cal, w, mic_arr, FS_SIM, CLIP,
                              temperature_c=TEMP_C, pressure_atm=PRESS_ATM,
-                             rel_humidity=RH)
+                             rel_humidity=RH, **ablate.render_flags())
         mono24 = decimate_to_out_rate(mono48, FS_SIM, FS_OUT)
         te, ps = solve_emission_times(tr, w, mic_arr, c)
         mic_at = (receiver_positions_at(tr, mic_arr) if mic_arr.ndim == 2
                   else mic_arr)
         u, _ = doa_unit_vectors(ps, mic_at)
         foas[tag] = encode_foa_timevarying(mono24, u)
+    if not ablate.ground_enabled():
+        return foas["direct"], foas["direct"]   # no_ground: 反射を加算しない
     return foas["direct"], foas["direct"] + foas["mirror"]
 
 
@@ -811,6 +818,8 @@ def generate_clip(row: dict) -> None:
                   "mix_spl_a": round(spl_a(mix[0], FS_OUT), 2),
                   "n_label_rows": len(label_rows),
                   "gen_seconds": round(time.perf_counter() - t_start, 1)}
+    if ablate.MODE:
+        s["ablate"] = ablate.MODE   # 来歴: どの物理を外した生成かをsceneに残す
     (wdir / "scene.json").write_text(json.dumps(s, indent=2, default=str))
     srcs = "+".join(x["class"] for x in s["sources"]) or "none"
     print(f"[gen] {name} {row['motion']} tier={row['danger_tier']} {srcs} "
