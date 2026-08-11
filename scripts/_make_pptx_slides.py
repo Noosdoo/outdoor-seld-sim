@@ -513,51 +513,53 @@ footer(sl, 3)
 
 # ============ 9 検証1 ============
 sl = new_slide()
-header(sl, "RESULTS 1/2", "検証 — 学習に使っていないデータでの評価")
-tb = box(sl, 54, 100, W - 108, 44)
+header(sl, "RESULTS 1/2", "検証 — 8クラスの検出・方向・距離")
+tb = box(sl, 54, 98, W - 108, 30)
 para(tb.text_frame,
-     [("評価の作法：合格基準を", {}), ("先に決め", {"bold": True, "color": INK}),
-      ("、学習に未使用の評価セット", {}),
-      ("1,800クリップ", {"bold": True, "color": INK}),
-      ("で", {}), ("1回だけ", {"bold": True, "color": INK}),
-      ("評価（結果を見てから基準や評価を変えない）", {})],
+     [("評価データ：", {}), ("学習に未使用の1,800クリップ",
+                        {"bold": True, "color": INK}),
+      ("（合成・種類/方向/距離の正解つき）で", {}),
+      ("1回だけ", {"bold": True, "color": INK}), ("評価", {})],
      size=13.5, color=INK2, line=1.3, after=0, first=True)
 rows = [
-    ("項目", "目標（事前に設定）", "結果", "判定"),
-    ("車の検出", "検出率 ≥99%・方向誤差 ≤3.0°", "99.4% ／ 2.0°", "達成"),
-    ("静音EV", "単独EVの検出率 ≥95%", "99.0%", "達成"),
-    ("新クラス", "バイク≥90／踏切列車≥99／キック≥60", "99.8 ／ 100.0 ／ 97.3%", "達成"),
-    ("距離推定", "至近の中央誤差 ≤0.30m・重大判定 ≥68%", "0.21m ／ 69.0%", "達成"),
-    ("総合スコア", "SELDスコア ≤0.085", "0.087", "未達"),
+    ("クラス", "検出率（可聴フレーム）", "方向誤差（中央値）"),
+    ("サイレン（救急・パト・消防）", "99.5%", "3.2°"),
+    ("クラクション", "99.2%", "2.2°"),
+    ("バック音", "97.2%", "5.1°"),
+    ("自転車ベル", "97.6%", "4.1°"),
+    ("車（EV・大型含む）", "99.4%", "2.0°"),
+    ("踏切・列車", "100.0%", "3.5°"),
+    ("キックボード", "97.3%", "1.0°"),
+    ("バイク", "99.8%", "1.0°"),
 ]
-gt = sl.shapes.add_table(6, 4, Pt(54), Pt(150), Pt(W - 108), Pt(270)).table
-gt.columns[0].width = Pt(110)
-gt.columns[1].width = Pt(320)
-gt.columns[2].width = Pt(320)
-gt.columns[3].width = Pt(102)
+gt = sl.shapes.add_table(9, 3, Pt(54), Pt(132), Pt(620), Pt(292)).table
+gt.columns[0].width = Pt(280)
+gt.columns[1].width = Pt(180)
+gt.columns[2].width = Pt(160)
 for ri, row in enumerate(rows):
     for ci, val in enumerate(row):
         cell = gt.cell(ri, ci)
         cell.fill.solid()
         cell.fill.fore_color.rgb = PAPER2 if ri == 0 else WHITE
-        cell.margin_top = cell.margin_bottom = Pt(4)
+        cell.margin_top = cell.margin_bottom = Pt(2)
         tf = cell.text_frame
         tf.word_wrap = True
-        col = INK2 if ri == 0 else INK2
-        bold = ri == 0
-        align = PP_ALIGN.LEFT
-        if ci == 3 and ri > 0:
-            col = GREEN if val == "達成" else RED
-            bold = True
-            align = PP_ALIGN.CENTER
-        if ci == 0 and ri > 0:
-            bold = True
-            col = INK
-        para(tf, val, size=12.5 if ri else 11.5, bold=bold, color=col, align=align,
+        para(tf, val, size=12 if ri else 11,
+             bold=(ri == 0 or ci == 0),
+             color=INK if (ri and ci == 0) else INK2,
+             align=(PP_ALIGN.LEFT if ci == 0 else PP_ALIGN.RIGHT),
              after=0, first=True)
+c = card(sl, 700, 132, 206, 292, title="距離推定（車）")
+para(c.text_frame, [("至近（≤5m）の\n中央絶対誤差", {})], size=12, color=INK2,
+     line=1.3)
+para(c.text_frame, [("0.21m", {"bold": True, "color": INK, "size": 26})],
+     size=26, after=8)
+para(c.text_frame, "静音EVだけの場面でも検出率 99.0%", size=11.5, color=INK2,
+     line=1.3)
 tb = box(sl, 54, 434, W - 108, 30)
-para(tb.text_frame, "8クラスの可聴検出率は 97.2〜100%（未達の項目も含めてそのまま報告している）",
-     size=12, color=MUTED, after=0, first=True)
+para(tb.text_frame,
+     "可聴フレーム＝背景騒音に対してSNR≥0dBの区間。検出率はその全フレームに対する割合、方向誤差は全検出の中央値",
+     size=11.5, color=MUTED, after=0, first=True)
 footer(sl, 4)
 
 # ============ 10 検証2 ============
@@ -590,11 +592,14 @@ label(sl, fx + 12, fy + 122, W - 132,
       size=10.5, align=PP_ALIGN.LEFT)
 cw = (W - 108 - 40) / 3
 for i, (t, lines) in enumerate([
-    ("通知層", [[("重大車への至近警告到達 ", {}), ("69.9%", {"bold": True, "color": INK, "size": 15})],
-                    [("安全車の抑制 ", {}), ("90.4%", {"bold": True, "color": INK, "size": 15}),
-                     ("・誤警告 1.3%", {})]]),
-    ("静音の脅威にも", [[("キックボード", {}),], [("至近警告到達 ", {}), ("88.7%", {"bold": True, "color": INK, "size": 15})]]),
-    ("可聴域の外へ", [[("40kHz超音波", {"bold": True, "color": INK}), ("の検出系を初実装", {})],
+    ("通知層（車）", [[("1.5m以内まで近づく車に至近警告が出た割合 ", {}),
+                  ("69.9%", {"bold": True, "color": INK, "size": 15})],
+                 [("3.2mより遠い車を鳴らさなかった割合 ", {}),
+                  ("90.4%", {"bold": True, "color": INK, "size": 15})],
+                 [("安全な車への誤った至近警告 1.3%", {})]]),
+    ("静音の脅威にも", [[("1.5m以内まで近づく", {}), ("キックボード", {"bold": True, "color": INK})],
+                 [("への至近警告 ", {}), ("88.7%", {"bold": True, "color": INK, "size": 15})]]),
+    ("可聴域の外へ", [[("40kHz超音波", {"bold": True, "color": INK}), ("の検出系を実装", {})],
                 [("（静穏環境で10m先まで検出）", {})]]),
 ]):
     c = card(sl, 54 + i * (cw + 20), 286, cw, 150, title=t)
