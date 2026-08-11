@@ -159,8 +159,8 @@
       <div class="card"><h3>前提</h3>
         <p>視覚は健常と仮定。<strong>検出・通知は全方位</strong>——絞るのは方向でなく「視覚で代替できる情報」。前方でも音でしか得られない情報（サイレン・踏切警報・EV）は対象。第1対象は難聴者</p></div>
     </div>
-    <div class="callout"><div class="t">8/4からの拡張</div>
-      <p>クラス：6 → <strong>8</strong>（キックボード・バイク・列車を追加）／推定量：種類＋方向 → <strong>＋距離</strong>／音源仕様：<strong>日本の法規・省令・実測研究で出典を層別管理</strong></p></div>
+    <div class="callout"><div class="t">このシステムができること</div>
+      <p>危険音の<strong>種類・方向・距離</strong>を同時に推定し、安全な車は鳴らさず、<strong>危険な接近だけを3段階の振動で伝える</strong>。音源仕様は日本の法規・省令・実測研究に根拠を持たせている</p></div>
   </div>
   <footer><div class="chips"></div><span class="pageno"></span></footer>
 </section>
@@ -298,7 +298,7 @@
     <div class="cols c3">
       <div class="card"><h3>物理シミュレーション</h3><p>伝搬遅延／ドップラー／距離減衰／大気吸収／地面反射を自作実装（物理検証済み）</p></div>
       <div class="card"><h3>4ch音＋方向・距離ラベル</h3><p>同一経路から同時に出力（FOA）。ラベル誤差ゼロの「教科書」</p></div>
-      <div class="card"><h3>学習・評価</h3><p>PSELDNetsをファインチューニング。<span class="num">学習10,200＋確定評価1,800クリップ</span></p></div>
+      <div class="card"><h3>学習・評価</h3><p>PSELDNetsをファインチューニング。<span class="num">学習10,200＋評価1,800クリップ</span></p></div>
     </div>
     <ul class="pts">
       <li>なぜ合成か：① 屋外の方向つきデータが他に存在しない　② 物理を自分で持てば1つずつ外せる＝<strong>ablationができる土俵</strong>になる</li>
@@ -338,7 +338,7 @@
         <text x="210" y="34"  text-anchor="middle" font-size="14" font-weight="800" fill="#2F7D6D">&gt;3.2m 抑制</text>
         <text x="210" y="320" text-anchor="middle" font-size="13.5" fill="#66707F">全部鳴らすと使えない → 通知の頻度そのものを設計対象にする</text>
       </svg>
-      <figcaption>8/4時点は危険度を区別できなかった → 距離推定の統合で3段階が機能（今回の最大の進捗）</figcaption>
+      <figcaption>知覚層が「何が・どこから・どれだけ近くに」を推定し、通知層が「いつ・どの強さで」伝えるかを決める</figcaption>
     </figure>
   </div>
   <footer><div class="chips"></div><span class="pageno"></span></footer>
@@ -346,25 +346,25 @@
 
 <!-- 10 検証1 -->
 <section class="slide" data-step="5">
-  <header><div class="kicker">RESULTS 1/2 — 確定評価</div><h2>検証 — 事前固定した未使用セットでの一発評価</h2></header>
+  <header><div class="kicker">RESULTS 1/2</div><h2>検証 — 学習に使っていないデータでの評価</h2></header>
   <div class="body">
-    <p style="font-size:19px">作法：合格基準を<strong>先に宣言</strong> → <strong>未使用の評価セット1,800本</strong>を新規生成 → <strong>1回だけ</strong>推論・採点（答案を見てから基準を変えられない形）。AI外部監査（敵対的レビュー3巡）で<span class="em">完全合格</span>。</p>
+    <p style="font-size:19px">評価の作法：合格基準を<strong>先に決め</strong>、学習に未使用の評価セット<strong>1,800クリップ</strong>で<strong>1回だけ</strong>評価（結果を見てから基準や評価を変えない）。</p>
     <table>
-      <tr><th style="width:120px">ゲート</th><th>事前宣言した基準</th><th>確定値</th><th style="width:80px">判定</th></tr>
-      <tr><td><b>G1</b> 基本</td><td>車 ≥99%・方向 ≤3.0°</td><td class="num"><b>99.4%</b> ／ 2.0°</td><td class="ok">達成</td></tr>
-      <tr><td><b>G2</b> 静音EV</td><td>単独EV ≥95%</td><td class="num"><b>99.0%</b>（前世代80.2%から<b>+19pt</b>）</td><td class="ok">達成</td></tr>
-      <tr><td><b>G3</b> 新クラス</td><td>バイク≥90／踏切列車≥99／キック≥60</td><td class="num">99.8 ／ 100.0 ／ 97.3%</td><td class="ok">達成</td></tr>
-      <tr><td><b>G4</b> 距離</td><td>至近中央 ≤0.30m・重大判定 ≥68%</td><td class="num"><b>0.21m</b> ／ 69.0%</td><td class="ok">達成</td></tr>
-      <tr><td><b>G5</b> 総合</td><td>SELDスコア ≤0.085</td><td class="num">0.087（学習時指標）</td><td class="ng">未達</td></tr>
+      <tr><th style="width:130px">項目</th><th>目標（事前に設定）</th><th>結果</th><th style="width:80px">判定</th></tr>
+      <tr><td>車の検出</td><td>検出率 ≥99%・方向誤差 ≤3.0°</td><td class="num"><b>99.4%</b> ／ 2.0°</td><td class="ok">達成</td></tr>
+      <tr><td>静音EV</td><td>単独EVの検出率 ≥95%</td><td class="num"><b>99.0%</b></td><td class="ok">達成</td></tr>
+      <tr><td>新クラス</td><td>バイク≥90／踏切列車≥99／キック≥60</td><td class="num">99.8 ／ 100.0 ／ 97.3%</td><td class="ok">達成</td></tr>
+      <tr><td>距離推定</td><td>至近の中央誤差 ≤0.30m・重大判定 ≥68%</td><td class="num"><b>0.21m</b> ／ 69.0%</td><td class="ok">達成</td></tr>
+      <tr><td>総合スコア</td><td>SELDスコア ≤0.085</td><td class="num">0.087</td><td class="ng">未達</td></tr>
     </table>
-    <p style="font-size:18px;color:var(--muted)">8クラス可聴検出率 97.2〜100%。未達も隠さず記載するのが本研究の検証の作法。</p>
+    <p style="font-size:18px;color:var(--muted)">8クラスの可聴検出率は 97.2〜100%（未達の項目も含めてそのまま報告している）。</p>
   </div>
   <footer><div class="chips"></div><span class="pageno"></span></footer>
 </section>
 
 <!-- 11 検証2 -->
 <section class="slide" data-step="5">
-  <header><div class="kicker">RESULTS 2/2 — 聞こえる前</div><h2>検証 — 人の耳より先に気づけるか</h2></header>
+  <header><div class="kicker">RESULTS 2/2</div><h2>検証 — 人の耳より先に気づけるか</h2></header>
   <div class="body">
     <figure>
       <svg viewBox="0 0 1080 150" style="max-width:100%;height:auto" role="img" aria-label="サイレンの初検知距離：中央208m、90パーセンタイル279m、最大303mを距離軸上に示す">
@@ -376,10 +376,10 @@
         <g><line x1="971" y1="100" x2="971" y2="58" stroke="#B37E00" stroke-width="2.5"/><text x="971" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#B37E00">p90 279m</text></g>
         <g><line x1="1049" y1="100" x2="1049" y2="76" stroke="#66707F" stroke-width="2"/><text x="1030" y="70" text-anchor="middle" font-size="13" fill="#66707F">最大 303m</text></g>
       </svg>
-      <figcaption>サイレン初検知距離（100〜300m遠方配置・未検知ゼロ・確定評価）—「人が気づく前から機械の耳は聞いている」を距離で定量化</figcaption>
+      <figcaption>サイレン初検知距離（100〜300m遠方配置・未検知ゼロ）—「人が気づく前から機械の耳は聞いている」を距離で定量化</figcaption>
     </figure>
     <div class="cols c3">
-      <div class="card"><h3>通知層（確定評価）</h3><p class="num">重大車への至近警告到達 <b>69.9%</b><br>安全車の抑制 <b>90.4%</b>・誤警告 1.3%</p></div>
+      <div class="card"><h3>通知層</h3><p class="num">重大車への至近警告到達 <b>69.9%</b><br>安全車の抑制 <b>90.4%</b>・誤警告 1.3%</p></div>
       <div class="card"><h3>静音の脅威にも</h3><p class="num">キックボード 至近警告到達 <b>88.7%</b></p></div>
       <div class="card"><h3>可聴域の外へ</h3><p class="num"><b>40kHz超音波</b>の検出系を初実装（静穏環境で10m先まで検出）</p></div>
     </div>
@@ -394,8 +394,8 @@
     <p>動機：どの物理要因が、どの誤り（<strong>見逃し／誤通知／方向外れ</strong>）を生むのかを分離する。</p>
     <div class="cols c3">
       <div class="card"><h3>規模</h3><p>物理を1つだけ外した版 ×4<br>（ドップラー・大気吸収・幾何減衰・地面反射）</p></div>
-      <div class="card"><h3>測り方</h3><p>各版を<strong>全物理の確定評価セット＋実録60本</strong>の共通土俵で採点 → 落ちた分＝その物理の大事さ</p></div>
-      <div class="card"><h3>準備状況</h3><p>学習レシピ・採点系・評価セットは確定済み（計画第5版）。<strong>9月に実録と同じ土俵で実施</strong></p></div>
+      <div class="card"><h3>測り方</h3><p>各版を<strong>同一の評価セット＋実環境録音</strong>の共通土俵で採点 → 落ちた分＝その物理の大事さ</p></div>
+      <div class="card"><h3>位置づけ</h3><p>「合成データのどの物理が実環境性能に必要か」という問いに、切り分け実験で直接答える</p></div>
     </div>
   </div>
   <footer><div class="chips"></div><span class="pageno"></span></footer>
@@ -427,7 +427,7 @@
     <ul class="pts">
       <li><span class="tag ink">実録</span> 実環境は未検証（9月に測定）。合成の空間手がかりは理想的過ぎる可能性</li>
       <li><span class="tag ink">指標</span> 総合SELDスコアは事前基準に僅差未達（0.087 vs 0.085。個別性能は全達成）</li>
-      <li><span class="tag ink">通知</span> 至近警告の到達は約7割。未達の主因は距離推定が2フレーム連続で1.5mに届かないケース（個票監査で全数分類済み・安全車への誤帰属はほぼ無し）</li>
+      <li><span class="tag ink">通知</span> 至近警告の到達は約7割。未達の主因は距離推定が2フレーム連続で1.5mに届かないケース（失敗例は全数分類済み・安全な車への誤帰属はほぼ無し）</li>
       <li><span class="tag ink">学習</span> キックボードの高騒音下検出は88.7% — 距離重視の学習とのトレードオフが残る</li>
       <li><span class="tag ink">設計</span> 通知の同一物体判定は方位連結による近似（完全なトラッキングは将来課題）</li>
     </ul>
@@ -441,10 +441,10 @@
   <header><div class="kicker">SUMMARY</div><h2>まとめ</h2></header>
   <div class="body">
     <ul class="pts" style="gap:20px">
-      <li>8クラス・<strong>距離つき</strong>屋外SELDを日本準拠の合成データで構築し、<strong>事前固定の未使用セットで確定評価</strong>（ゲート4/5達成・AI外部監査 完全合格）</li>
+      <li>8クラス・<strong>距離つき</strong>屋外SELDを日本準拠の合成データで構築し、<strong>学習に未使用の評価データで性能を確認</strong>（事前設定の目標5項目中4項目を達成）</li>
       <li>通知層が<strong>推定距離で3段階</strong>に出し分け — 至近警告到達 <span class="num"><b>69.9%</b></span>・安全車の抑制 <span class="num"><b>90.4%</b></span>・キックボード <span class="num"><b>88.7%</b></span></li>
       <li>「聞こえる前」を定量化 — サイレン初検知 <span class="big num" style="font-size:40px">208m</span>・40kHz超音波検出も初実装</li>
-      <li>次：<strong>9月の実録評価</strong>（測定方法確定済み）と<strong>物理ablation</strong>で「どの物理が必要か」に答える</li>
+      <li>次：<strong>実環境録音での評価</strong>と<strong>物理要素の切り分け実験</strong>で「どの物理が必要か」に答える</li>
     </ul>
     <div class="stripe" style="margin:8px -72px 0"></div>
   </div>
