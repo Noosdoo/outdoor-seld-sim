@@ -264,6 +264,9 @@ label(sl, fx + 120, fy + 150, 100, "ユーザー", size=10.5, color=INK2)
 conn(sl, fx + 40, fy + 300, fx + 150, fy + 152, RED, 2.5, arrow=True)
 conn(sl, fx + 170, fy + 316, fx + 170, fy + 152, RED, 2.5, arrow=True)
 conn(sl, fx + 300, fy + 300, fx + 190, fy + 152, RED, 2.5, arrow=True)
+conn(sl, fx + 120, fy + 24, fx + 160, fy + 112, AMBER, 2.5, arrow=True)
+label(sl, fx + 8, fy + 6, 180, "サイレン（前方も対象）", size=10, color=AMBERD,
+      bold=True, align=PP_ALIGN.LEFT)
 label(sl, fx + 4, fy + 306, 90, "緊急車両", size=10.5, color=INK, bold=True)
 label(sl, fx + 126, fy + 320, 90, "車・バイク", size=10.5, color=INK, bold=True)
 label(sl, fx + 246, fy + 306, 110, "キックボード", size=10.5, color=INK, bold=True)
@@ -279,7 +282,7 @@ for i, (t, body) in enumerate([
     ("伝え方",
      "音の種類・方向・距離を推定し、危険度3段階（至近警告／注意／抑制）を首元の振動で伝える。行動の判断は本人に委ねる"),
     ("前提",
-     "視覚は健常と仮定。前方視野内の対象はスコープ外。第1対象は難聴者（イヤホン歩行者・高齢者へ拡張可能）"),
+     "視覚は健常と仮定。検出・通知は全方位——絞るのは方向でなく「視覚で代替できる情報」。前方でも音でしか得られない情報（サイレン・踏切警報・EV）は対象。第1対象は難聴者"),
 ]):
     c = card(sl, 54 + i * (cw + 20), 118, cw, 190, title=t)
     para(c.text_frame, body, size=13, color=INK2, line=1.3)

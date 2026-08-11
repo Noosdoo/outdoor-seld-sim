@@ -122,7 +122,7 @@
         <li class="amber">機械の耳は人間の耳の限界（可聴域・可聴距離）に縛られない<br>→「耳の代わり」を超えて<span class="em">人の耳を超える支援</span>まで狙える</li>
       </ul>
       <figure>
-        <svg viewBox="0 0 420 300" style="max-width:100%;height:auto" role="img" aria-label="前方視野の外＝後方から車・キックボード・緊急車両が接近する俯瞰図">
+        <svg viewBox="0 0 420 300" style="max-width:100%;height:auto" role="img" aria-label="検出は全方位。後方の車・キックボードに加え、前方のサイレンなど音でしか得られない情報も対象とする俯瞰図">
           <path d="M210 150 L130 30 A150 150 0 0 1 290 30 Z" fill="#16233A" fill-opacity=".08"/>
           <text x="210" y="52" text-anchor="middle" font-size="13" fill="#66707F">前方視野</text>
           <circle cx="210" cy="150" r="18" fill="#16233A"/>
@@ -133,11 +133,14 @@
             <line x1="210" y1="292" x2="210" y2="178"/>
             <line x1="360" y1="270" x2="238" y2="172"/>
           </g>
+          <defs><marker id="arA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#E8A200"/></marker></defs>
+          <line x1="150" y1="26" x2="196" y2="128" stroke="#E8A200" stroke-width="3" marker-end="url(#arA)"/>
+          <text x="120" y="18" text-anchor="middle" font-size="13" fill="#B37E00" font-weight="700">サイレン（前方も対象）</text>
           <text x="52"  y="290" text-anchor="middle" font-size="14" fill="#16233A" font-weight="700">緊急車両</text>
           <text x="210" y="312" text-anchor="middle" font-size="14" fill="#16233A" font-weight="700">車・バイク</text>
           <text x="368" y="290" text-anchor="middle" font-size="14" fill="#16233A" font-weight="700">キックボード</text>
         </svg>
-        <figcaption>視覚の外（後方・側方）から接近する「音を発する動的な脅威」が対象</figcaption>
+        <figcaption>検出・通知は全方位。視覚外（後方・側方）が価値の主戦場、前方も「音でしか得られない情報」（サイレン・踏切警報・EV）は対象</figcaption>
       </figure>
     </div>
   </div>
@@ -154,7 +157,7 @@
       <div class="card"><h3>伝え方</h3>
         <p>音の<strong>種類・方向・距離</strong>を推定し、危険度3段階（至近警告／注意／抑制）を<strong>首元の振動</strong>で伝える。行動の判断は本人に委ねる</p></div>
       <div class="card"><h3>前提</h3>
-        <p>視覚は健常と仮定。前方視野内の対象はスコープ外。第1対象は難聴者（イヤホン歩行者・高齢者へ拡張可能）</p></div>
+        <p>視覚は健常と仮定。<strong>検出・通知は全方位</strong>——絞るのは方向でなく「視覚で代替できる情報」。前方でも音でしか得られない情報（サイレン・踏切警報・EV）は対象。第1対象は難聴者</p></div>
     </div>
     <div class="callout"><div class="t">8/4からの拡張</div>
       <p>クラス：6 → <strong>8</strong>（キックボード・バイク・列車を追加）／推定量：種類＋方向 → <strong>＋距離</strong>／音源仕様：<strong>日本の法規・省令・実測研究で出典を層別管理</strong></p></div>
