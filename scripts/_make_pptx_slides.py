@@ -641,7 +641,7 @@ for i, (tag, col, body) in enumerate([
     tagchip(sl, 54 + i * (cw + 20) + 14, 118, tag, col)
     para(tf, body, size=12, color=INK2, line=1.3, first=True)
 bullets(sl, 54, 244, W - 108, [
-    {"runs": [("機材：4ch FOAマイク（Zoom H3-VR）・96kHz・風防。テイク前に方位校正音＋騒音計LAeqを記録", {})]},
+    {"runs": [("機材：4ch FOAマイク（Zoom H3-VR・レンタル）・96kHz・風防。テイク前に方位校正音＋騒音計LAeqを記録", {})]},
     {"runs": [("注釈（車種・目視速度・横距離・風速・LAeq）を正解として", {}),
               ("合成と同一の採点系", {"bold": True, "color": INK}), ("で比較（計65本）", {})]},
 ], size=13.5)
