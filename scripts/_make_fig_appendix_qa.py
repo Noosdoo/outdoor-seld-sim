@@ -180,7 +180,7 @@ box(sl, 6.85, 1.25, 5.95, 0.66, fill=AMBERD, line=None, radius=0.12)
 txt(sl, 7.05, 1.35, 5.5, 0.5, [("実録 ＝ 本物の物差し（テイク単位の粗い注釈）", {"size": 14.5, "bold": True, "color": WHITE})])
 box(sl, 7.1, 2.15, 5.45, 1.35, fill=PAPER2, line=HAIR)
 txt(sl, 7.3, 2.3, 5.1, 1.1, [
-    ("trial=3, event=1, class=車, 象限=右,", {}),
+    ("trial=3, event_id=1, class=車, 象限=右,", {}),
     ("t_cpa=00:41(±1s), 横距離=2m(コーン実測),", {}),
     ("速度=徐行(目視), LAeq=52.3, 装着=チェスト", {}),
 ], size=11, color=INK2, mono=True, gap=2)

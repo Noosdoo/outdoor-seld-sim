@@ -276,7 +276,7 @@ tri.rotation = 90
 box(sl, sx + 3.15, sy + 0.85, 2.15, 1.85, fill=PAPER2, line=HAIR)
 txt(sl, sx + 3.3, sy + 1.0, 1.9, 0.4, [("帰宅後、注釈CSVの1行に", {"size": 10, "bold": True})])
 txt(sl, sx + 3.3, sy + 1.4, 1.9, 1.2, [
-    ("trial=3, event=1,", {"size": 9}),
+    ("trial=3, event_id=1,", {"size": 9}),
     ("class=車, 象限=右, 徐行,", {"size": 9}),
     ("横2m, LAeq=52.3", {"size": 9}),
 ], mono=True, gap=1, color=INK2)
