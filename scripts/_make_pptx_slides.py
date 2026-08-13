@@ -150,7 +150,7 @@ def footer(sl, active):
              first=True)
         x += wd + 8
     tb = box(sl, W - 140, 504, 90, 22)
-    para(tb.text_frame, f"{PAGENO[0]} / 17", size=10.5, color=MUTED,
+    para(tb.text_frame, f"{PAGENO[0]} / 18", size=10.5, color=MUTED,
          align=PP_ALIGN.RIGHT, after=0, first=True)
 
 
@@ -513,7 +513,42 @@ label(sl, cx - 170, cy + 158, 340, "全部鳴らすと使えない → 通知の
       size=10.5)
 footer(sl, 3)
 
-# ============ 9 検証1 ============
+# ============ 9 データセットと評価手順（2026-08-13挿入・Sol指摘対応） ============
+sl = new_slide()
+header(sl, "VALIDATION SETUP", "検証の前に — データセットと評価手順")
+rows = [
+    ("区分", "中身", "本研究での役割"),
+    ("事前学習", "1,167時間・170クラス（PSELDNets付属）", "出発点の基盤モデル（既存を利用）"),
+    ("学習（微調整）", "本研究の合成10,200クリップ（8クラス・約28時間）",
+     "距離ヘッド込みで全体をファインチューニング"),
+    ("検証", "学習と同一方式の別クリップ", "モデル選択・通知閾値の決定（発表数値には不使用）"),
+    ("評価", "同一設計・新乱数の1,800クリップ（学習・検証に未使用）",
+     "最終結果の測定 — 1回だけ採点"),
+]
+gt = sl.shapes.add_table(5, 3, Pt(54), Pt(128), Pt(W - 108), Pt(252)).table
+gt.columns[0].width = Pt(150)
+gt.columns[1].width = Pt(372)
+gt.columns[2].width = Pt(330)
+for ri, row in enumerate(rows):
+    for ci, val in enumerate(row):
+        cell = gt.cell(ri, ci)
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = (PAPER2 if ri == 0 else
+                                    (HILITE if ri == 4 else WHITE))
+        cell.margin_top = cell.margin_bottom = Pt(4)
+        tf = cell.text_frame
+        tf.word_wrap = True
+        para(tf, val, size=12.5, bold=(ri == 0 or ci == 0),
+             color=INK if (ri and ci == 0) else INK2,
+             align=PP_ALIGN.LEFT, after=0, first=True)
+b = rect(sl, 54, 410, W - 108, 54, fill=HILITE)
+para(b.text_frame,
+     [("基準を先に決める → 未使用データを新たに生成 → 1回だけ評価", {"bold": True, "color": INK}),
+      ("　＝ 答案を見てから基準を変えられない手順", {"color": INK2})],
+     size=13.5, after=0, first=True)
+footer(sl, 4)
+
+# ============ 10 検証1 ============
 sl = new_slide()
 header(sl, "RESULTS 1/2", "検証 — 8クラスの検出・方向・距離")
 tb = box(sl, 54, 98, W - 108, 30)
