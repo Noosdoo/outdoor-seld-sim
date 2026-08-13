@@ -297,7 +297,7 @@ para(tf, "このシステムができること", size=14, bold=True, color=INK, 
      first=True)
 para(tf, [("危険音の", {}), ("種類・方向・距離", {"bold": True, "color": INK}),
           ("を同時に推定し、安全な車は鳴らさず、", {}),
-          ("危険な接近だけを3段階の振動で伝える", {"bold": True, "color": AMBERD}),
+          ("危険な接近だけを3段階で通知する（提示は首元振動を将来構想）", {"bold": True, "color": AMBERD}),
           ("。音源仕様は日本の法規・省令・実測研究に根拠を持たせている", {})],
      size=14, color=INK2, line=1.35)
 footer(sl, 0)

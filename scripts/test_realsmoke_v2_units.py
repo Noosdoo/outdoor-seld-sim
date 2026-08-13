@@ -87,18 +87,54 @@ check("T4 方位連結（40°=発火/70°=非発火）",
 # ---------------- T5: 統計 ----------------
 p_mc = v2.mcnemar_exact(0, 8)
 lo0, hi0 = v2.poisson_rate_ci(0, 100 / 60.0, alpha=0.10)  # 片側95%上限に相当
-bs = v2.paired_bootstrap_median_diff([1, 2, 3, 4], [0, 1, 2, 3], n_boot=2000, seed=0)
+bs = v2.paired_bootstrap_median_diff_by_clip(
+    {"cA": [1.0, 1.0], "cB": [1.0]}, n_boot=2000, seed=0)
 check("T5a McNemar厳密 p(0,8)=2^-7",
       abs(p_mc - 2 * (0.5 ** 8)) < 1e-9, f"(p={p_mc:.6f})")
 check("T5b Poisson片側95%上限（0件/100分）≈1.80回/h",
       abs(hi0 - 1.797) < 0.02, f"(hi={hi0:.3f})")
-check("T5c paired bootstrap（定差1s）CI=[1,1]",
+check("T5c クリップ単位paired bootstrap（定差1s）CI=[1,1]",
       bs is not None and abs(bs[0] - 1.0) < 1e-9 and abs(bs[1] - 1.0) < 1e-9
       and abs(bs[2] - 1.0) < 1e-9, f"({bs})")
+
+# ---------------- T6: 警告音クラス=v1定数（3フレーム連続・不応期5s） ----------------
+f2 = v2.fires_for_clip({10: [(0, 0.0, None)], 11: [(0, 0.0, None)]}, 100, 60.0)
+f3 = v2.fires_for_clip({10: [(0, 0.0, None)], 11: [(0, 0.0, None)],
+                        12: [(0, 0.0, None)]}, 100, 60.0)
+pred_rf = {k: [(0, 0.0, None)] for k in (10, 11, 12, 40, 41, 42, 70, 71, 72)}
+f_rf = v2.fires_for_clip(pred_rf, 100, 60.0)
+check("T6 警告=3フレーム連続（2フレームでは非発火）",
+      0 not in f2 and len(f3.get(0, [])) == 1, f"(2f={f2}, 3f={f3})")
+check("T6b 不応期5s（3s後=抑制/6s後=再発火）",
+      len(f_rf.get(0, [])) == 2, f"({f_rf.get(0)})")
+
+# ---------------- T7: 負例マスク（注釈イベント窓の発火は誤警告に数えない） ----------------
+pred7 = {"c3": {68: [(0, 0.0, None)], 69: [(0, 0.0, None)], 70: [(0, 0.0, None)]}}
+rows7 = [
+    {"clip_id": "c3", "event_id": "1", "trial": "t1", "class": "siren",
+     "quadrant": "F", "t_start": "5", "t_cpa": "10"},
+    {"clip_id": "c3", "event_id": "1", "trial": "n1", "class": "none",
+     "quadrant": "", "t_start": "0", "t_cpa": "60"},
+]
+ev7, neg7 = v2.evaluate(rows7, pred7, link_deg=60.0, has_dist=True)
+e7 = [e for e in ev7 if e["class"] == "siren"][0]
+check("T7 イベント成功＋負例マスク（二重計上なし・露出は重なり控除）",
+      e7["notified"] is True and neg7["n_false"] == 0
+      and abs(neg7["exposure_s"] - 53.0) < 1e-6,
+      f"(notified={e7['notified']}, false={neg7['n_false']}, exp={neg7['exposure_s']})")
+
+# ---------------- T8: 中通知（1.5<d≤3.0は強にしない・mid_reachで記録） ----------------
+pred8 = {"c4": {30: [(4, 0.0, 2.0)], 31: [(4, 2.0, 2.0)]}}
+rows8 = [{"clip_id": "c4", "event_id": "1", "trial": "t1", "class": "car_drive",
+          "quadrant": "F", "t_start": "1", "t_cpa": "5"}]
+ev8, _ = v2.evaluate(rows8, pred8, link_deg=60.0, has_dist=True)
+check("T8 d=2.0mは強通知にせず中到達として記録",
+      ev8[0]["notified"] is False and ev8[0]["mid_reach"] is True,
+      f"(notified={ev8[0]['notified']}, mid={ev8[0]['mid_reach']})")
 
 print()
 if fails:
     print(f"NG: {len(fails)}件 {fails}")
     sys.exit(1)
-print("ALL PASS (7 checks)")
+print("ALL PASS (11 checks)")
 sys.exit(0)
