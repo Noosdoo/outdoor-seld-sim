@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Step 19: 実録スモーク用の変換 — H3-VR録音をパイプライン形式に変換する。
 
-入力: H3-VRのAmbiXモード録音（4ch WAV, 48kHz, チャンネル順 W,Y,Z,X = ACN/SN3D）
-処理: ①24kHzへリサンプル（polyphase） ②傾き補正のFOA回転（校正音の解析結果を
+入力: H3-VRのAmbiXモード録音（4ch WAV, 96kHz=現行規約/48kHz=旧規約, W,Y,Z,X = ACN/SN3D）
+     ※96kHz原本は超音波解析用にそのまま保持し、本スクリプトは本体モデル用の
+       24kHz版を別ファイルとして出力する（スモーク計画書2026-08-13改訂節1-2）
+処理: ①24kHzへリサンプル（polyphase・アンチエイリアス込み） ②傾き補正のFOA回転（校正音の解析結果を
      --pitch/--roll/--yaw で与える。1次アンビソニックスの回転は厳密）
      ③絶対較正 — 騒音計LAeq読み値と「録音内の暗騒音区間」のA特性レベルを照合し、
      録音全体を学習の音量規約（フルスケール=143dB SPL）に合わせるゲインを適用
@@ -57,8 +59,10 @@ def convert(path: Path, out_dir: Path, laeq: float, win: tuple,
     wav, sr = sf.read(path, dtype="float64")
     assert wav.ndim == 2 and wav.shape[1] == 4, \
         f"{path.name}: 4ch(AmbiX)ではありません shape={wav.shape}"
-    assert sr in (48000, 24000), f"{path.name}: 想定外のfs={sr}"
-    if sr == 48000:
+    assert sr in (96000, 48000, 24000), f"{path.name}: 想定外のfs={sr}"
+    if sr == 96000:
+        wav = resample_poly(wav, 1, 4, axis=0)
+    elif sr == 48000:
         wav = resample_poly(wav, 1, 2, axis=0)
     # 傾き補正（W不変、X,Y,ZベクトルにR適用。ch順=W,Y,Z,X）
     if pitch or roll or yaw:
