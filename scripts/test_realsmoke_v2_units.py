@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
-"""実録経路の単体テスト（第11回監査 再合格条件1-3の検証）。
+"""実録経路の単体テスト（第11回監査系の再合格条件を検証。2026-08-13 19:18指摘の
+回帰3件=T9/T10/T11を含む）。
 
-T1: step19が96kHz入力を受理し24kHz/長さ1/4で出力する
-T2: 長尺負例の全区間走査（50秒地点の発火を検出。旧実装の10秒固定では0件になる）
-T3: event_id単位のイベント窓（1発火は最大1イベントにのみ割当）
-T4: v3.4距離トリガの方位連結±60°（40°差=発火 / 70°差=非発火）
-T5: 統計（McNemar厳密・Poisson区間・paired bootstrap）の数値検算
+T1 : step19が96kHz入力を受理し24kHz/長さ1/4で出力
+T2 : 長尺負例の全区間走査（50秒地点の発火。旧実装の10秒固定では0件）
+T3 : event_id窓の貪欲割当（1発火は最大1イベント）
+T4 : v3.4距離トリガの方位連結±60°（40°=発火/70°=非発火）
+T5 : 統計（McNemar厳密・Poisson片側95%上限=本番出力関数・クリップ単位bootstrap）
+T6 : 警告音=v1定数（3フレーム連続・不応期5s）＋因果時刻(k+1)/FPS
+T7 : 負例マスク（注釈イベント窓の発火は誤警告に数えず・露出の重なり控除）
+T8 : caution車（横距離2.5m）は中通知で成功・リード/象限が出る
+T9 : 【回帰】2m,2m,1m列で強は発火しない（T3×2連続をT2列から昇格させない）
+T10: 【回帰】safe車（横距離10m）への強発火は失敗（誤・強通知）
+T11: 【回帰】caution車2m予測のリード=t_cpa−(k+1)/FPS が数値一致
 """
 from __future__ import annotations
 
@@ -60,22 +67,22 @@ with tempfile.TemporaryDirectory() as td:
 pred = {"c1": {500: [(4, 10.0, 1.0)], 501: [(4, 12.0, 1.0)]}}
 rows = [{"clip_id": "c1", "event_id": "1", "trial": "n1", "class": "none",
          "quadrant": "", "t_start": "0", "t_cpa": "120"}]
-ev, neg = v2.evaluate(rows, pred, link_deg=60.0, has_dist=True)
+ev, neg, _ = v2.evaluate(rows, pred, link_deg=60.0, has_dist=True)
 check("T2 長尺負例で50s地点の発火を検出",
       neg["n_false"] == 1 and abs(neg["exposure_s"] - 120.0) < 1e-9,
       f"(n_false={neg['n_false']}, exp={neg['exposure_s']}s; 旧実装なら0件)")
 
-# ---------------- T3: event_id窓と貪欲割当 ----------------
+# ---------------- T3: event_id窓と貪欲割当（critical扱い） ----------------
 pred3 = {"c2": {49: [(4, 0.0, 1.0)], 50: [(4, 2.0, 1.0)]}}
 rows3 = [
     {"clip_id": "c2", "event_id": "1", "trial": "t1", "class": "car_drive",
-     "quadrant": "F", "t_start": "3", "t_cpa": "8"},
+     "quadrant": "F", "t_start": "3", "t_cpa": "8", "横距離m": "1.0"},
     {"clip_id": "c2", "event_id": "2", "trial": "t1", "class": "car_drive",
-     "quadrant": "F", "t_start": "20", "t_cpa": "25"},
+     "quadrant": "F", "t_start": "20", "t_cpa": "25", "横距離m": "1.0"},
 ]
-ev3, _ = v2.evaluate(rows3, pred3, link_deg=60.0, has_dist=True)
+ev3, _, _ = v2.evaluate(rows3, pred3, link_deg=60.0, has_dist=True)
 got = {e["event_id"]: e["notified"] for e in ev3}
-check("T3 1発火は1イベントのみ通知成功",
+check("T3 1発火は1イベントのみ成功",
       got.get("1") is True and got.get("2") is False, f"({got})")
 
 # ---------------- T4: ±60°連結 ----------------
@@ -84,31 +91,34 @@ h_out = v2.dist_triggers_var({10: [(10.0, 1.4)], 11: [(80.0, 1.4)]}, 1.5, 20, 60
 check("T4 方位連結（40°=発火/70°=非発火）",
       len(h_in) == 1 and len(h_out) == 0, f"(in={h_in}, out={h_out})")
 
-# ---------------- T5: 統計 ----------------
+# ---------------- T5: 統計（本番出力関数を直接検証） ----------------
 p_mc = v2.mcnemar_exact(0, 8)
-lo0, hi0 = v2.poisson_rate_ci(0, 100 / 60.0, alpha=0.10)  # 片側95%上限に相当
+up1 = v2.poisson_upper95_one_sided(0, 100 / 60.0)   # 本番mdに出す片側95%上限
 bs = v2.paired_bootstrap_median_diff_by_clip(
     {"cA": [1.0, 1.0], "cB": [1.0]}, n_boot=2000, seed=0)
 check("T5a McNemar厳密 p(0,8)=2^-7",
       abs(p_mc - 2 * (0.5 ** 8)) < 1e-9, f"(p={p_mc:.6f})")
-check("T5b Poisson片側95%上限（0件/100分）≈1.80回/h",
-      abs(hi0 - 1.797) < 0.02, f"(hi={hi0:.3f})")
+check("T5b 本番の片側95%上限（0件/100分）≈1.80回/h",
+      abs(up1 - 1.797) < 0.02, f"(hi={up1:.3f})")
 check("T5c クリップ単位paired bootstrap（定差1s）CI=[1,1]",
       bs is not None and abs(bs[0] - 1.0) < 1e-9 and abs(bs[1] - 1.0) < 1e-9
       and abs(bs[2] - 1.0) < 1e-9, f"({bs})")
 
-# ---------------- T6: 警告音クラス=v1定数（3フレーム連続・不応期5s） ----------------
+# ---------------- T6: 警告音=v1定数＋因果時刻 ----------------
 f2 = v2.fires_for_clip({10: [(0, 0.0, None)], 11: [(0, 0.0, None)]}, 100, 60.0)
 f3 = v2.fires_for_clip({10: [(0, 0.0, None)], 11: [(0, 0.0, None)],
                         12: [(0, 0.0, None)]}, 100, 60.0)
 pred_rf = {k: [(0, 0.0, None)] for k in (10, 11, 12, 40, 41, 42, 70, 71, 72)}
 f_rf = v2.fires_for_clip(pred_rf, 100, 60.0)
-check("T6 警告=3フレーム連続（2フレームでは非発火）",
-      0 not in f2 and len(f3.get(0, [])) == 1, f"(2f={f2}, 3f={f3})")
+w3 = f3.get(0, {}).get("warn", [])
+check("T6 警告=3フレーム連続＋因果時刻(k+1)/FPS=1.3s",
+      not f2.get(0, {}).get("warn") and len(w3) == 1 and abs(w3[0][0] - 1.3) < 1e-9,
+      f"(2f={f2.get(0)}, 3f={w3})")
+w_rf = f_rf.get(0, {}).get("warn", [])
 check("T6b 不応期5s（3s後=抑制/6s後=再発火）",
-      len(f_rf.get(0, [])) == 2, f"({f_rf.get(0)})")
+      len(w_rf) == 2 and abs(w_rf[1][0] - 7.3) < 1e-9, f"({w_rf})")
 
-# ---------------- T7: 負例マスク（注釈イベント窓の発火は誤警告に数えない） ----------------
+# ---------------- T7: 負例マスク ----------------
 pred7 = {"c3": {68: [(0, 0.0, None)], 69: [(0, 0.0, None)], 70: [(0, 0.0, None)]}}
 rows7 = [
     {"clip_id": "c3", "event_id": "1", "trial": "t1", "class": "siren",
@@ -116,25 +126,50 @@ rows7 = [
     {"clip_id": "c3", "event_id": "1", "trial": "n1", "class": "none",
      "quadrant": "", "t_start": "0", "t_cpa": "60"},
 ]
-ev7, neg7 = v2.evaluate(rows7, pred7, link_deg=60.0, has_dist=True)
+ev7, neg7, _ = v2.evaluate(rows7, pred7, link_deg=60.0, has_dist=True)
 e7 = [e for e in ev7 if e["class"] == "siren"][0]
-check("T7 イベント成功＋負例マスク（二重計上なし・露出は重なり控除）",
+check("T7 イベント成功＋負例マスク（二重計上なし・露出控除）",
       e7["notified"] is True and neg7["n_false"] == 0
       and abs(neg7["exposure_s"] - 53.0) < 1e-6,
       f"(notified={e7['notified']}, false={neg7['n_false']}, exp={neg7['exposure_s']})")
 
-# ---------------- T8: 中通知（1.5<d≤3.0は強にしない・mid_reachで記録） ----------------
+# ---------------- T8: caution車は中通知で成功 ----------------
 pred8 = {"c4": {30: [(4, 0.0, 2.0)], 31: [(4, 2.0, 2.0)]}}
 rows8 = [{"clip_id": "c4", "event_id": "1", "trial": "t1", "class": "car_drive",
-          "quadrant": "F", "t_start": "1", "t_cpa": "5"}]
-ev8, _ = v2.evaluate(rows8, pred8, link_deg=60.0, has_dist=True)
-check("T8 d=2.0mは強通知にせず中到達として記録",
-      ev8[0]["notified"] is False and ev8[0]["mid_reach"] is True,
-      f"(notified={ev8[0]['notified']}, mid={ev8[0]['mid_reach']})")
+          "quadrant": "F", "t_start": "1", "t_cpa": "5", "横距離m": "2.5"}]
+ev8, _, ex8 = v2.evaluate(rows8, pred8, link_deg=60.0, has_dist=True)
+check("T8 caution車=中通知で成功（リード・象限あり）",
+      ev8[0]["notified"] is True and ev8[0]["fired_tier"] == "中"
+      and ev8[0]["lead"] is not None and ev8[0]["quad_ok"] is True,
+      f"(tier={ev8[0]['fired_tier']}, lead={ev8[0]['lead']})")
+
+# ---------------- T9:【回帰】2m,2m,1mで強は発火しない ----------------
+dseq9 = {10: [(0.0, 2.0)], 11: [(0.0, 2.0)], 12: [(0.0, 1.0)]}
+strong9 = v2.dist_triggers_var(dseq9, v2.T3, 20, 60.0)
+mid9 = v2.dist_triggers_var(dseq9, v2.T2, 20, 60.0)
+ctrl = v2.dist_triggers_var({10: [(0.0, 1.4)], 11: [(0.0, 1.4)]}, v2.T3, 20, 60.0)
+check("T9 【回帰】2m,2m,1m→強0件・中あり（1.4,1.4→強1件）",
+      len(strong9) == 0 and len(mid9) >= 1 and len(ctrl) == 1,
+      f"(strong={strong9}, mid={len(mid9)}件, ctrl={ctrl})")
+
+# ---------------- T10:【回帰】safe車への強発火=失敗 ----------------
+pred10 = {"c5": {30: [(4, 0.0, 1.0)], 31: [(4, 1.0, 1.0)]}}
+rows10 = [{"clip_id": "c5", "event_id": "1", "trial": "t1", "class": "car_drive",
+           "quadrant": "F", "t_start": "1", "t_cpa": "5", "横距離m": "10"}]
+ev10, _, _ = v2.evaluate(rows10, pred10, link_deg=60.0, has_dist=True)
+check("T10 【回帰】safe車（10m）への強発火は失敗として採点",
+      ev10[0]["gt_tier"] == "safe" and ev10[0]["notified"] is False
+      and ev10[0]["fired_tier"] == "強",
+      f"(tier={ev10[0]['gt_tier']}, notified={ev10[0]['notified']})")
+
+# ---------------- T11:【回帰】caution車のリード数値 ----------------
+# 中トリガはframe31で成立→因果時刻3.2s。t_cpa=5 → lead=1.8
+check("T11 【回帰】caution車2mのリード=5−3.2=1.8s",
+      abs(ev8[0]["lead"] - 1.8) < 1e-9, f"(lead={ev8[0]['lead']})")
 
 print()
 if fails:
     print(f"NG: {len(fails)}件 {fails}")
     sys.exit(1)
-print("ALL PASS (11 checks)")
+print("ALL PASS (13 checks)")
 sys.exit(0)

@@ -23,6 +23,12 @@ step12のルールv1（fire_events）を使う。
 """
 from __future__ import annotations
 
+import sys as _sys
+print("ERROR: step20_realsmoke_score.py は第11回監査で欠陥が確定し使用禁止です。", file=_sys.stderr)
+print("       step20_realsmoke_score_v2.py を使用してください。", file=_sys.stderr)
+_sys.exit(2)
+
+
 import csv
 import importlib.util
 import sys

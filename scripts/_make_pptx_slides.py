@@ -645,7 +645,8 @@ for i, (tag, col, body) in enumerate([
 bullets(sl, 54, 244, W - 108, [
     {"runs": [("機材：4ch FOAマイク（Zoom H3-VR・レンタル）・96kHz・風防。テイク前に方位校正音＋騒音計LAeqを記録", {})]},
     {"runs": [("注釈（車種・目視速度・横距離・風速・LAeq）を正解として", {}),
-              ("合成と同一の採点系", {"bold": True, "color": INK}), ("で比較（計65本）", {})]},
+              ("同じモデル・同じ通知閾値", {"bold": True, "color": INK}),
+              ("で比較（正解は実録注釈の粒度・計65本）", {})]},
 ], size=13.5)
 rect(sl, 54, 336, 6, 110, fill=AMBER)
 c = rect(sl, 60, 336, W - 114, 110, fill=WHITE, line=HAIR)
