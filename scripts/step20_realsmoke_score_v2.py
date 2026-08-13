@@ -1,29 +1,30 @@
 # -*- coding: utf-8 -*-
-"""Step 20 v2: 実録採点（第11回監査系の対応版。2026-08-13 19:18指摘まで反映）。
+"""Step 20 v2: 実録採点（2026-08-13 19:53指摘まで反映）。
 
-規則の正: 距離クラスは step12_notify_v33/v12b と同じく **T3(1.5m)とT2(3.0m)で
-独立に** 2フレーム連続＋方位連結±LINK_DEG のトリガを生成する（T2列の
-エピソード最小値で強へ昇格させる旧v2実装は誤りとして撤回）。
-警告音クラスは v1 の事前決定値（3フレーム連続・不応期5s・方向±45°）。
-発火時刻は因果時刻 (k+1)/FPS（step12_notify_v9.emit_time と同一）。
+設計原則: 通知規則・エピソード統合は**正規実装(step12_notify_v33/v12b, v9)の定数と
+規則をそのまま使う**。本スクリプト独自の規則発明はしない。
 
-GT区分（実録の主評価）: 注釈の**横距離m**から
-  critical: ≤1.5m ／ caution: 1.5〜3.2m ／ safe: >3.2m
-を定義（3.0–3.2mはグレーだが抑制境界SUPP=3.2でcaution側に含める）。
-実録はcritical車を安全上収録しないため、車系の主評価は caution/safe。
-  - critical: 窓内の強発火=成功（リード・象限は強から）
-  - caution : 窓内の中or強発火=成功（リード・象限はその発火から。
-              強での過剰通知は n_strong_on_caution として別掲）
-  - safe    : 窓内に強発火が**無い**こと=成功（安全車への誤・強通知=失敗。
-              中発火は n_mid_on_safe として別掲）
-  - 警告音クラス: 窓内の警告発火=成功
-横距離m列が無い距離クラス行はcritical扱いで採点し、警告を表示する。
+距離クラス（car/kick/bike）:
+  - トリガ: v3.4（≤閾が2フレーム連続＋前フレーム候補と方位連結±LINK_DEG=60）を
+    強(T3=1.5)と中(T2=3.0)で**独立に**生成
+  - エピソード統合: 正規group_episodesと同一の「**フレーム差≤1かつ方位差≤AZ_MATCH=25°**」
+    （旧v2のEP_GAP=10・±60°統合は誤りとして撤回）
+  - **1つの物理エピソードは1つ**: 中トリガ列からエピソードを作り、エピソード内に
+    強トリガフレームが含まれればtier=強（発火時刻は強成立の因果時刻）、無ければ中。
+    消費フラグはエピソード単位で共通（強/中の二重割当は起きない）
+警告音クラス: v1定数（3フレーム連続・不応期5s・方向±45°）。
+発火時刻は因果時刻 (k+1)/FPS。
 
-負例(class=none): 注釈済みイベント窓に入る発火をマスクし、露出も重なりを控除。
-誤警告率は両側95%CIに加えて**片側95%上限**（事前登録の「<1.8回/h」判定用）を出力。
-
-統計: McNemar厳密（イベント成功のA/B不一致対）・クリップ単位paired bootstrap
-（リード差）・Poisson厳密区間。比較キーは (clip, trial, event_id, class)。
+GT区分（注釈の横距離mから）: critical ≤1.5 / caution ≤3.2 / safe >3.2
+  - critical: 窓内の強エピソード=成功（リードは強成立時刻から）
+  - caution : 窓内のエピソード（中/強）=成功（リードは中成立時刻から。
+              強での過剰通知はn_strong_on_cautionに別掲）
+  - safe    : 窓内に**強・中いずれの通知も無い**こと=成功
+              （安全車への通知は段階を問わず失敗。正規の抑制定義と同一）
+  - 横距離m欠落/不正の距離クラス行は**未採点**（分母から除外・件数を警告表示）
+負例(class=none): エピソード単位で計数・注釈イベント窓をマスク・露出は重なり控除。
+誤警告率は両側95%CIに加え片側95%上限（事前登録<1.8回/hの判定用）。
+統計: McNemar厳密・クリップ単位paired bootstrap・Poisson厳密区間。
 
 入力列: clip_id,event_id,trial,class,quadrant,t_start,t_cpa[,横距離m,...]
 予測CSV: 6/7列 [stem,frame,class(,track),az,el,dist]（5列旧形式は警告クラスのみ）
@@ -43,10 +44,10 @@ if hasattr(sys.stdout, "reconfigure"):
 
 FPS = 10.0
 T3, T2, SUPP = 1.5, 3.0, 3.2     # step12_notify_v33と同一
+AZ_MATCH = 25.0                  # v33のエピソード統合幅（LINK_DEGとは別物）
 WARN_CONFIRM = 3                 # v1: 0.3s連続
 REFRACT_FRAMES = 50              # v1: 不応期5s
 REFRACT_DEG = 45.0               # v1: 方向別±45°
-EP_GAP = 10
 WIN_PRE, WIN_POST = 1.0, 1.0
 
 CLS_IDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3,
@@ -75,8 +76,7 @@ def quadrant_of(az_deg: float) -> str:
 
 
 def gt_tier_of(lateral_m):
-    if lateral_m is None:
-        return "critical"
+    """横距離m→GT区分。Noneは呼び出し側で未採点にする。"""
     if lateral_m <= T3:
         return "critical"
     if lateral_m <= SUPP:
@@ -119,8 +119,7 @@ def load_pred(path: Path):
 
 # ------------------------------------------------------------ 通知発火（可変長）
 def dist_triggers_var(dseq, thresh, nframes, link_deg):
-    """v3.4距離トリガの可変長版（≤threshが2フレーム連続＋方位連結）。
-    強(T3)・中(T2)は**この関数を閾値別に呼んで独立に**生成する。"""
+    """v3.4距離トリガ（≤threshが2フレーム連続＋方位連結±link_deg）の可変長版。"""
     hits, prev = [], []
     for j in range(nframes):
         close = [(a, d) for a, d in dseq.get(j, []) if d is not None and d <= thresh]
@@ -134,15 +133,27 @@ def dist_triggers_var(dseq, thresh, nframes, link_deg):
     return hits
 
 
-def episodes_of(hits, link_deg):
-    """発火列→エピソード先頭 [(t_causal, az)]。因果時刻=(j+1)/FPS。"""
-    eps = []
-    for j, a, _ in hits:
-        if eps and j - eps[-1][-1][0] <= EP_GAP and cdiff(a, eps[-1][-1][1]) <= link_deg:
-            eps[-1].append((j, a))
+def build_episodes(dseq, nframes, link_deg):
+    """中(T2)トリガ列を正規group_episodesと同一規則（フレーム差≤1かつ
+    方位差≤AZ_MATCH=25°）でエピソード化し、エピソード内に強(T3)トリガが
+    含まれればtier=強とする。返り値: [{"t_mid","az_mid","t_strong","az_strong",
+    "tier"}]（時刻は因果時刻(j+1)/FPS）。"""
+    trig_m = dist_triggers_var(dseq, T2, nframes, link_deg)
+    strong = {j: a for j, a, _ in dist_triggers_var(dseq, T3, nframes, link_deg)}
+    groups = []
+    for j, a, d in trig_m:
+        if groups and j - groups[-1][-1][0] == 1 and cdiff(a, groups[-1][-1][1]) <= AZ_MATCH:
+            groups[-1].append((j, a))
         else:
-            eps.append([(j, a)])
-    return [((ep[0][0] + 1) / FPS, ep[0][1]) for ep in eps]
+            groups.append([(j, a)])
+    eps = []
+    for g in groups:
+        s = [(j, a) for j, a in g if j in strong]
+        eps.append({"t_mid": (g[0][0] + 1) / FPS, "az_mid": g[0][1],
+                    "t_strong": (s[0][0] + 1) / FPS if s else None,
+                    "az_strong": s[0][1] if s else None,
+                    "tier": "強" if s else "中"})
+    return eps
 
 
 def warn_fires(frames_of_cls, az_of, nframes):
@@ -160,8 +171,7 @@ def warn_fires(frames_of_cls, az_of, nframes):
 
 
 def fires_for_clip(pred_clip, nframes, link_deg):
-    """cls -> {"strong":[(t,az)], "mid":[(t,az)]}（距離クラス）
-              {"warn":[(t,az)]}（警告クラス）"""
+    """cls -> {"episodes":[...]}（距離クラス） / {"warn":[(t,az)]}（警告クラス）"""
     by_cls_frames = defaultdict(set)
     az_at = defaultdict(dict)
     dseq = defaultdict(lambda: defaultdict(list))
@@ -174,11 +184,7 @@ def fires_for_clip(pred_clip, nframes, link_deg):
     out = {}
     for c in sorted(by_cls_frames):
         if c in DIST_CLS:
-            strong = episodes_of(dist_triggers_var(dseq[c], T3, nframes, link_deg),
-                                 link_deg)
-            mid = episodes_of(dist_triggers_var(dseq[c], T2, nframes, link_deg),
-                              link_deg)
-            out[c] = {"strong": strong, "mid": mid}
+            out[c] = {"episodes": build_episodes(dseq[c], nframes, link_deg)}
         else:
             out[c] = {"warn": warn_fires(by_cls_frames[c], az_at[c], nframes)}
     return out
@@ -186,11 +192,9 @@ def fires_for_clip(pred_clip, nframes, link_deg):
 
 # ------------------------------------------------------------------ 採点
 def evaluate(rows, pred, link_deg, has_dist):
-    """返り値: (events, negatives, extras)
-    events[i]: clip,trial,event_id,class,gt_tier,notified(=GT区分に応じた成功),
-               fired_tier,lead,quad_ok
-    negatives: n_false, exposure_s（イベント窓マスク・露出控除済み）
-    extras: n_strong_on_caution, n_mid_on_safe, n_no_lateral"""
+    """返り値: (events, negatives, extras)。
+    events[i]: clip,trial,event_id,class,gt_tier,notified,fired_tier,lead,quad_ok
+    （横距離欠落の距離クラス行は notified=None=未採点で分母除外）"""
     need = defaultdict(float)
     for r in rows:
         need[r["clip_id"]] = max(need[r["clip_id"]], float(r["t_cpa"]) + WIN_POST + 1.0)
@@ -225,21 +229,16 @@ def evaluate(rows, pred, link_deg, has_dist):
         return total
 
     events, n_false, exposure_s = [], 0, 0.0
-    extras = {"n_strong_on_caution": 0, "n_mid_on_safe": 0, "n_no_lateral": 0}
+    extras = {"n_strong_on_caution": 0, "n_mid_on_safe": 0, "n_unscored": 0}
     by_key = defaultdict(list)
     for r in rows:
         clip = r["clip_id"]
         if r["class"].strip() == "none":
             t0, t1 = float(r["t_start"]), float(r["t_cpa"])
             exposure_s += (t1 - t0) - overlap(t0, t1, pos_windows[clip])
-            # 誤警告は通知エピソード単位: 同一クラスで強と時間的に重なる中は
-            # 同じ通知の段階違いなので1件に統合（強を代表にする）
             fires_all = []
             for grp in fires_by_clip[clip].values():
-                strong_t = [t for t, _ in grp.get("strong", [])]
-                fires_all += strong_t
-                fires_all += [t for t, _ in grp.get("mid", [])
-                              if all(abs(t - ts) > EP_GAP / FPS for ts in strong_t)]
+                fires_all += [ep["t_mid"] for ep in grp.get("episodes", [])]
                 fires_all += [t for t, _ in grp.get("warn", [])]
             n_false += sum(1 for t in fires_all
                            if t0 <= t <= t1 and not masked(clip, t))
@@ -257,45 +256,48 @@ def evaluate(rows, pred, link_deg, has_dist):
                                "lead": None, "quad_ok": None})
             continue
         if ci in DIST_CLS:
-            strong = sorted(grp.get("strong", []))
-            mid = sorted(grp.get("mid", []))
-            used_s = [False] * len(strong)
-            used_m = [False] * len(mid)
+            eps = grp.get("episodes", [])
+            used = [False] * len(eps)
             for r in sorted(evrows, key=lambda x: float(x["t_cpa"])):
                 lat = lateral_of(r)
+                base = {"clip": clip, "trial": r["trial"],
+                        "event_id": r.get("event_id", "1"), "class": cls}
                 if lat is None:
-                    extras["n_no_lateral"] += 1
+                    extras["n_unscored"] += 1
+                    events.append({**base, "gt_tier": "-", "notified": None,
+                                   "fired_tier": None, "lead": None,
+                                   "quad_ok": None})
+                    continue
                 tier = gt_tier_of(lat)
                 t0 = float(r["t_start"]) - WIN_PRE
                 t1 = float(r["t_cpa"]) + WIN_POST
-                base = {"clip": clip, "trial": r["trial"],
-                        "event_id": r.get("event_id", "1"), "class": cls,
-                        "gt_tier": tier}
-                s_in = [(i, t, az) for i, (t, az) in enumerate(strong)
-                        if t0 <= t <= t1]
-                m_in = [(i, t, az) for i, (t, az) in enumerate(mid)
-                        if t0 <= t <= t1]
+                base["gt_tier"] = tier
                 if tier == "safe":
-                    # 安全車: 強発火が1件でもあれば失敗（誤・強通知）
-                    if m_in:
-                        extras["n_mid_on_safe"] += len(m_in)
-                    ok = not s_in
-                    events.append({**base, "notified": ok,
-                                   "fired_tier": ("強" if s_in else
-                                                  ("中" if m_in else None)),
+                    # 安全車: 強・中いずれの通知も無いこと=成功（消費はしない）
+                    in_w = [ep for ep in eps if t0 <= ep["t_mid"] <= t1
+                            or (ep["t_strong"] is not None
+                                and t0 <= ep["t_strong"] <= t1)]
+                    extras["n_mid_on_safe"] += sum(1 for ep in in_w
+                                                   if ep["tier"] == "中")
+                    events.append({**base, "notified": not in_w,
+                                   "fired_tier": (in_w[0]["tier"] if in_w else None),
                                    "lead": None, "quad_ok": None})
                     continue
-                if tier == "critical":
-                    pool = [("強", i, t, az) for i, t, az in s_in
-                            if not used_s[i]]
-                else:  # caution: 中or強の早い方
-                    pool = sorted(
-                        [("強", i, t, az) for i, t, az in s_in if not used_s[i]]
-                        + [("中", i, t, az) for i, t, az in m_in if not used_m[i]],
-                        key=lambda x: x[2])
-                if pool:
-                    ft, i, t, az = pool[0]
-                    (used_s if ft == "強" else used_m)[i] = True
+                pick = None
+                for i, ep in enumerate(eps):
+                    if used[i]:
+                        continue
+                    if tier == "critical":
+                        if ep["tier"] == "強" and t0 <= ep["t_strong"] <= t1:
+                            pick = (i, ep["t_strong"], ep["az_strong"], ep["tier"])
+                            break
+                    else:  # caution: 中/強どちらのエピソードでも、中成立時刻で判定
+                        if t0 <= ep["t_mid"] <= t1:
+                            pick = (i, ep["t_mid"], ep["az_mid"], ep["tier"])
+                            break
+                if pick is not None:
+                    i, t, az, ft = pick
+                    used[i] = True
                     if tier == "caution" and ft == "強":
                         extras["n_strong_on_caution"] += 1
                     events.append({**base, "notified": True, "fired_tier": ft,
@@ -339,7 +341,6 @@ def mcnemar_exact(b: int, c: int) -> float:
 
 
 def poisson_rate_ci(k: int, hours: float, alpha=0.05):
-    """両側CI（既定alpha=0.05）。片側95%上限は alpha=0.10 の上side。"""
     from scipy.stats import chi2
     lo = 0.0 if k == 0 else 0.5 * chi2.ppf(alpha / 2, 2 * k) / hours
     hi = 0.5 * chi2.ppf(1 - alpha / 2, 2 * (k + 1)) / hours
@@ -385,27 +386,27 @@ def main() -> int:
     quads = [e["quad_ok"] for e in scored if e["quad_ok"] is not None]
     hours = neg["exposure_s"] / 3600.0
     rep = [f"# 実録採点 v2（pred={pred_path.name}, v3.4 link=±{link_deg:.0f}°）", "",
-           f"- イベント {len(events)}件（event_id単位）"
+           f"- イベント {len(events)}件（event_id単位・採点対象 {len(scored)}件）"
            + ("" if has_dist else "（距離なし予測のため距離クラスは未採点）")]
     label = {"critical": "critical到達（強）", "caution": "caution到達（中以上）",
-             "safe": "safe抑制（強なし）", "warn": "警告音到達"}
+             "safe": "safe抑制（強・中とも通知なし）", "warn": "警告音到達"}
     for t in ("critical", "caution", "safe", "warn"):
         if by_tier[t][1]:
             rep.append(f"- {label[t]}: {by_tier[t][0]}/{by_tier[t][1]}")
     if extras["n_strong_on_caution"]:
         rep.append(f"- caution車への強通知（過剰・別掲）: {extras['n_strong_on_caution']}件")
     if extras["n_mid_on_safe"]:
-        rep.append(f"- safe車への中通知（別掲）: {extras['n_mid_on_safe']}件")
-    if extras["n_no_lateral"]:
-        rep.append(f"- ⚠️横距離m欠落でcritical扱いにした行: {extras['n_no_lateral']}件")
+        rep.append(f"- safe車への中通知（失敗の内訳・別掲）: {extras['n_mid_on_safe']}件")
+    if extras["n_unscored"]:
+        rep.append(f"- ⚠️横距離m欠落で未採点（分母除外）: {extras['n_unscored']}件")
     rep += [(f"- リード中央値 {np.median(leads):.1f}s（範囲 {min(leads):.1f}〜"
              f"{max(leads):.1f}s、注釈±1s精度）" if leads else "- リード: n/a"),
             (f"- 方向4象限一致 {sum(quads)}/{len(quads)}" if quads else "- 象限: n/a")]
     if hours > 0:
         lo, hi = poisson_rate_ci(neg["n_false"], hours)
         up1 = poisson_upper95_one_sided(neg["n_false"], hours)
-        rep.append(f"- 誤警告 {neg['n_false']}件 / {hours:.2f}h（注釈イベント窓マスク済み）"
-                   f"= {neg['n_false']/hours:.2f}回/h"
+        rep.append(f"- 誤警告 {neg['n_false']}件 / {hours:.2f}h（エピソード単位・"
+                   f"注釈イベント窓マスク済み）= {neg['n_false']/hours:.2f}回/h"
                    f"（両側95%CI {lo:.2f}〜{hi:.2f}／**片側95%上限 {up1:.2f}回/h**"
                    f"=事前登録の<1.8回/h判定用）")
     else:
