@@ -89,9 +89,12 @@ def lateral_of(row):
         v = row.get(k)
         if v not in (None, ""):
             try:
-                return float(v)
-            except ValueError:
+                lateral_m = float(v)
+            except (TypeError, ValueError):
                 return None
+            # NaN/Infinityは比較演算をすり抜けてsafeへ分類され得るため、
+            # 横距離として有効な有限・非負値だけを採用する。
+            return lateral_m if np.isfinite(lateral_m) and lateral_m >= 0.0 else None
     return None
 
 

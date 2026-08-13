@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""実録経路の単体テスト（2026-08-13 19:53指摘の回帰4件=T12〜T15を含む）。
+"""実録経路の単体テスト（2026-08-13の回帰5件=T12〜T16を含む）。
 
 T1 : step19が96kHz入力を受理し24kHz/長さ1/4で出力
 T2 : 長尺負例の全区間走査（50秒地点の発火。旧実装の10秒固定では0件）
@@ -16,6 +16,7 @@ T12: 【回帰】safe車への中通知も失敗（safe成功=強・中とも通
 T13: 【回帰】同一エピソードは強・中として二重割当されない（消費フラグ共通）
 T14: 【回帰】エピソード統合は正規規則（フレーム差≤1かつ方位差≤25°）
 T15: 【回帰】横距離欠落の距離クラス行は未採点（分母除外）
+T16: 【回帰】NaN/Infinity/負値の横距離は未採点（有限・非負値のみ有効）
 """
 from __future__ import annotations
 
@@ -208,6 +209,25 @@ ev15, _, ex15 = v2.evaluate(rows15, pred13, link_deg=60.0, has_dist=True)
 check("T15 【回帰】横距離欠落→未採点（分母除外・警告件数計上）",
       ev15[0]["notified"] is None and ex15["n_unscored"] == 1,
       f"(notified={ev15[0]['notified']}, unscored={ex15['n_unscored']})")
+
+# ---------------- T16:【回帰】非有限・負の横距離は未採点 ----------------
+invalid_lateral = ("NaN", "Infinity", "-Infinity", "-1")
+rows16 = [
+    {"clip_id": "c7", "event_id": str(i), "trial": "t1", "class": "car_drive",
+     "quadrant": "F", "t_start": "1", "t_cpa": "5", "横距離m": value}
+    for i, value in enumerate(invalid_lateral, start=1)
+]
+rows16.append(
+    {"clip_id": "c7", "event_id": "5", "trial": "t1", "class": "car_drive",
+     "quadrant": "F", "t_start": "1", "t_cpa": "5", "横距離m": "0"})
+ev16, _, ex16 = v2.evaluate(rows16, pred13, link_deg=60.0, has_dist=True)
+check("T16 【回帰】NaN/±Infinity/負値→未採点・0m→有効",
+      all(e["notified"] is None for e in ev16[:4])
+      and ev16[4]["gt_tier"] == "critical" and ev16[4]["notified"] is True
+      and ex16["n_unscored"] == 4,
+      f"(invalid={[e['notified'] for e in ev16[:4]]}, "
+      f"zero={(ev16[4]['gt_tier'], ev16[4]['notified'])}, "
+      f"unscored={ex16['n_unscored']})")
 
 print()
 if fails:
