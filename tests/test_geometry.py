@@ -72,9 +72,12 @@ def test_against_dynamicsound():
     te_mine, ps_mine = solve_emission_times(tr, wp, pr, C)
     max_dte, max_dps = 0.0, 0.0
     for i, t in enumerate(tr):
-        te_ds, ps_ds = ds.Simulation._compute_emission(
+        # DynamicSound新APIは回転姿勢を第3戻り値として追加した。幾何比較で使う
+        # 放射時刻・放射位置は先頭2要素のままなので、両API版に対応して取り出す。
+        emission = ds.Simulation._compute_emission(
             position_receiver=pr, time_receiver=float(t),
             source_path=src_path, c=C)
+        te_ds, ps_ds = emission[:2]
         if te_ds is None:
             assert np.isnan(te_mine[i])
             continue

@@ -35,10 +35,12 @@ GT区分（注釈の横距離mから）: critical ≤1.5 / caution ≤3.2 / safe
 
 **未実装（意図的・2026-08-15時点）**: ①幾何近似GTによる連続方位・距離誤差
 （動画同期と等速補間の工程が未設計。計画R5の②）②静止/歩行対のWilcoxon検定
-（対応キーの設計が未定。当面は検出フレーム率の対をCSVで出して手元で検定する）。
+（検定の採否基準は未確定。イベント別CSVには take_id / pair_id / 状態と
+検出フレーム率を出し、事前登録確定後に同じ対応キーで検定する）。
 卒論・発表でこの2つを「出せる」と書かないこと。
 
-入力列: clip_id,event_id,trial,class,quadrant,t_start,t_cpa[,横距離m,scored,...]
+入力列: clip_id,event_id,take_id,pair_id,trial,class,quadrant,t_start,t_cpa,
+        区分,状態[,横距離m,scored,...]
 予測CSV: 6/7列 [stem,frame,class(,track),az,el,dist]（5列旧形式は警告クラスのみ）
 """
 from __future__ import annotations
@@ -268,6 +270,12 @@ def evaluate(rows, pred, link_deg, has_dist):
     events, n_false, exposure_s = [], 0, 0.0
     extras = {"n_strong_on_caution": 0, "n_mid_on_safe": 0, "n_unscored": 0,
               "n_maskonly": 0}
+
+    def plan_meta(r):
+        return {"take_id": r.get("take_id", ""),
+                "pair_id": r.get("pair_id", ""),
+                "state": r.get("状態", "")}
+
     by_key = defaultdict(list)
     for r in rows:
         clip = r["clip_id"]
@@ -292,7 +300,7 @@ def evaluate(rows, pred, link_deg, has_dist):
                            "event_id": r.get("event_id", "1"),
                            "class": r["class"].strip(), "gt_tier": "mask",
                            "notified": None, "fired_tier": None,
-                           "lead": None, "quad_ok": None})
+                           "lead": None, "quad_ok": None, **plan_meta(r)})
             continue
         by_key[(clip, r["class"].strip())].append(r)
 
@@ -304,7 +312,7 @@ def evaluate(rows, pred, link_deg, has_dist):
                 events.append({"clip": clip, "trial": r["trial"],
                                "event_id": r.get("event_id", "1"), "class": cls,
                                "gt_tier": "-", "notified": None, "fired_tier": None,
-                               "lead": None, "quad_ok": None})
+                               "lead": None, "quad_ok": None, **plan_meta(r)})
             continue
         if ci in DIST_CLS:
             eps = grp.get("episodes", [])
@@ -313,6 +321,7 @@ def evaluate(rows, pred, link_deg, has_dist):
                 lat = lateral_of(r)
                 base = {"clip": clip, "trial": r["trial"],
                         "event_id": r.get("event_id", "1"), "class": cls,
+                        **plan_meta(r),
                         "frame_recall": frame_recall(
                             pred.get(clip, {}), ci,
                             float(r["t_start"]), float(r["t_cpa"]))}
@@ -368,6 +377,7 @@ def evaluate(rows, pred, link_deg, has_dist):
                 t1 = float(r["t_cpa"]) + WIN_POST
                 base = {"clip": clip, "trial": r["trial"],
                         "event_id": r.get("event_id", "1"), "class": cls,
+                        **plan_meta(r),
                         "gt_tier": "warn",
                         "frame_recall": frame_recall(
                             pred.get(clip, {}), ci, t0 + WIN_PRE, t1 - WIN_POST)}
@@ -423,11 +433,29 @@ def paired_bootstrap_median_diff_by_clip(diffs_by_clip, n_boot=10000, seed=0):
             float(np.percentile(meds, 97.5)))
 
 
+EVENT_CSV_FIELDS = ["clip", "take_id", "pair_id", "state", "trial", "event_id",
+                    "class", "gt_tier", "notified", "fired_tier", "lead",
+                    "quad_ok", "frame_recall"]
+
+
+def write_events_csv(path: Path, events) -> Path:
+    """歩行の対応比較を含む再解析用に、イベント別の機械可読CSVを保存する。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=EVENT_CSV_FIELDS, extrasaction="ignore")
+        w.writeheader()
+        for e in events:
+            w.writerow({k: e.get(k, "") for k in EVENT_CSV_FIELDS})
+    return path
+
+
 # ------------------------------------------------------------------ main
 def main() -> int:
     pred_path = Path(_arg("--pred"))
     ann_path = Path(_arg("--ann"))
     out_md = Path(_arg("--out", str(ROOT / "out" / "realsmoke" / "score_v2.md")))
+    events_out = Path(_arg("--events-out",
+                           str(out_md.with_name(out_md.stem + "_events.csv"))))
     link_deg = float(_arg("--link-deg", "60"))
     pred, has_dist = load_pred(pred_path)
     rows = list(csv.DictReader(open(ann_path, encoding="utf-8-sig")))
@@ -512,8 +540,10 @@ def main() -> int:
                    f"{fr if fr is not None else '—'} |")
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text("\n".join(rep) + "\n", encoding="utf-8")
+    write_events_csv(events_out, events)
     print("\n".join(rep[:12]))
     print("->", out_md)
+    print("->", events_out)
     return 0
 
 

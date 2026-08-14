@@ -27,6 +27,15 @@ T21: 【境界】重複帯の発火は1回だけ数える（半開区間）＋�
 T22: 【境界】3フレーム連続条件が境界で分断されない（重複なしだと取りこぼす）
 T23: scored=0 行は未採点だが誤警告マスクとしては働く
 T24: --gain-only の較正ゲインが全長変換と一致する（長時間録音の迂回路）
+T25〜T29: FOA回転・負例行検査・歩行対・検出F率・注釈appendの回帰
+T30: take_id/区分/状態の欠落で計画検査を迂回できない
+T31: 計画本数は切り出しclip数ではなく物理take_id単位
+T32: orig_duration_sとの照合で負例末尾欠落を検出
+T33: 歩行対比は件数だけでなくpair_idごとに静止1・歩行1
+T34: イベント別CSVへ対応キーと検出F率を保存
+T35: 96kHz原本直切りは較正ゲイン・3軸角の明示指定を必須化
+T36: 計画120テイク＋別枠負例100分が最終ゲートを通る
+T37: C負例の時間を別枠100分へ流用できない
 """
 from __future__ import annotations
 
@@ -448,12 +457,14 @@ def _val(rows, cut_mode=True, dur=10.0):
 
 ok_neg = [{"clip_id": "n_s000", "event_id": "n1", "trial": "neg", "class": "none",
            "quadrant": "", "t_start": "0", "t_cpa": "10", "orig_file": "n",
-           "cut_offset_s": "0", "scored": "1"}]
+           "orig_duration_s": "10", "cut_offset_s": "0", "scored": "1",
+           "take_id": "neg-n", "pair_id": "", "区分": "負例露出", "状態": "静止"}]
 bad_neg = [dict(ok_neg[0], orig_file="", cut_offset_s="", scored="garbage")]
-gap_neg = [dict(ok_neg[0]),
+gap_neg = [dict(ok_neg[0], orig_duration_s="19"),
            {"clip_id": "n_s001", "event_id": "n1", "trial": "neg", "class": "none",
             "quadrant": "", "t_start": "2", "t_cpa": "10", "orig_file": "n",
-            "cut_offset_s": "9", "scored": "1"}]
+            "orig_duration_s": "19", "cut_offset_s": "9", "scored": "1",
+            "take_id": "neg-n", "pair_id": "", "区分": "負例露出", "状態": "静止"}]
 head_neg = [dict(ok_neg[0], t_start="1", cut_offset_s="0")]
 e_ok, e_bad, e_gap, e_head = (_val(ok_neg), _val(bad_neg), _val(gap_neg),
                               _val(head_neg))
@@ -471,12 +482,15 @@ def _walk(n_stat, n_walk):
                      "class": "car_drive", "quadrant": "L", "t_start": "1",
                      "t_cpa": "8", "横距離m": "3.0", "区分": "歩行",
                      "状態": "静止" if i < n_stat else "歩行",
-                     "orig_file": "w", "cut_offset_s": "0", "scored": "1"})
+                     "take_id": f"walk-take-{i}",
+                     "pair_id": f"pair-{i if i < n_stat else i - n_stat}",
+                     "orig_file": f"w{i}", "orig_duration_s": "10",
+                     "cut_offset_s": "0", "scored": "1"})
     return _val(rows)
 
 check("T27 歩行対比が静止/歩行の対で揃わなければエラー",
-      not any("対になって" in m for m in _walk(10, 10))
-      and any("対になって" in m for m in _walk(12, 8)),
+      not any("静止1・歩行1" in m for m in _walk(10, 10))
+      and any("静止1・歩行1" in m for m in _walk(12, 8)),
       f"(10-10={len(_walk(10,10))}, 12-8={len(_walk(12,8))})")
 
 # ---------------- T28: 検出フレーム率 ----------------
@@ -505,6 +519,138 @@ with tempfile.TemporaryDirectory() as td:
           and [r["clip_id"] for r in got29b].count("b_s000") == 1
           and next(r for r in got29b if r["clip_id"] == "b_s000")["t_cpa"] == "9.000",
           f"(n={len(got29)}→{len(got29b)})")
+
+# ---------------- T30: 計画列は必須（--strict迂回を防ぐ） ----------------
+missing_plan = [{"clip_id": "x", "event_id": "1", "trial": "x",
+                 "class": "car_drive", "quadrant": "L", "t_start": "1",
+                 "t_cpa": "8", "横距離m": "3", "orig_file": "x",
+                 "orig_duration_s": "10", "cut_offset_s": "0", "scored": "1"}]
+e30 = _val(missing_plan)
+check("T30 take_id/区分/状態の欠落を必須列エラーにする",
+      any("必須列" in m for m in e30), f"(errors={e30})")
+
+# ---------------- T31: 計画本数は切り出しclipでなくtake_id単位 ----------------
+plan31 = cut.plan_negative_split(20.0)
+rows31 = [cut.negative_row(f"c_s{i:03d}", "c", off, a, b,
+                           {"take_id": "C-take-1", "pair_id": "", "区分": "C",
+                            "状態": "静止"}, orig_duration_s=20.0)
+          for i, (off, a, b) in enumerate(plan31)]
+val.errs.clear()
+val.warns.clear()
+with_plan31 = dict.fromkeys(val.PLAN_DEFAULT, 0)
+with_plan31["C"] = 1
+val.validate(rows31, True, 10.0, with_plan31)
+check("T31 C負例1テイクを3クリップへ分割しても計画数は1テイク",
+      not val.errs and not any("テイク（計画" in w for w in val.warns),
+      f"(clips={len(rows31)}, errors={val.errs}, warnings={val.warns})")
+
+# ---------------- T32: 原録音末尾クリップ欠落を検出 ----------------
+plan32 = cut.plan_negative_split(100.0)
+rows32 = [cut.negative_row(f"n_s{i:03d}", "n", off, a, b,
+                           {"take_id": "N-long", "pair_id": "", "区分": "負例露出",
+                            "状態": "静止"}, orig_duration_s=100.0)
+          for i, (off, a, b) in enumerate(plan32[:-1])]
+val.errs.clear()
+val.warns.clear()
+val.validate(rows32, True, 10.0, dict.fromkeys(val.PLAN_DEFAULT, 0))
+check("T32 100秒負例の末尾クリップ欠落をorig_duration_sで検出",
+      any("担当終端" in m and "100.000" in m for m in val.errs),
+      f"(errors={val.errs})")
+
+# ---------------- T33: 同数でもpair_idが崩れた歩行比較は不合格 ----------------
+rows33 = []
+for i in range(20):
+    rows33.append({"clip_id": f"p{i}", "event_id": "1", "trial": "walk",
+                   "class": "car_drive", "quadrant": "L", "t_start": "1",
+                   "t_cpa": "8", "横距離m": "3", "take_id": f"take-{i}",
+                   "pair_id": f"{'S' if i < 10 else 'W'}-{i % 10}",
+                   "区分": "歩行", "状態": "静止" if i < 10 else "歩行",
+                   "orig_file": f"p{i}", "orig_duration_s": "10",
+                   "cut_offset_s": "0", "scored": "1"})
+val.errs.clear()
+val.warns.clear()
+val.validate(rows33, True, 10.0, {**dict.fromkeys(val.PLAN_DEFAULT, 0), "歩行": 20})
+check("T33 静止10・歩行10でもpair_idが対応しなければ不合格",
+      any("静止1・歩行1" in m for m in val.errs), f"(errors={len(val.errs)})")
+
+# ---------------- T34: イベント別CSVに歩行対応キーと検出F率を出す ----------------
+with tempfile.TemporaryDirectory() as td:
+    p34 = Path(td) / "events.csv"
+    e34 = dict(ev28[0], take_id="take-34", pair_id="pair-34", state="歩行")
+    v2.write_events_csv(p34, [e34])
+    import csv as _csv34
+    got34 = next(_csv34.DictReader(open(p34, encoding="utf-8-sig")))
+    check("T34 イベント別CSVにtake_id/pair_id/状態/検出F率を保存",
+          got34["take_id"] == "take-34" and got34["pair_id"] == "pair-34"
+          and got34["state"] == "歩行" and got34["frame_recall"] == "0.375",
+          f"(row={got34})")
+
+# ---------------- T35: 原本直切りの較正・回転引数を必須化 ----------------
+raw_missing = False
+try:
+    cut.require_raw_metadata(96000, ["step19b", "--gain-db", "0"])
+except ValueError:
+    raw_missing = True
+raw_explicit_ok = True
+try:
+    cut.require_raw_metadata(96000, ["step19b", "--gain-db", "0", "--pitch", "0",
+                                     "--roll", "0", "--yaw", "0"])
+except ValueError:
+    raw_explicit_ok = False
+check("T35 96kHz原本はgain/pitch/roll/yawの明示指定が必須（0値は可）",
+      raw_missing and raw_explicit_ok)
+
+# ---------------- T36: 完全な120テイク＋負例100分はstrict相当で合格 ----------------
+rows36 = []
+for kind in "ABCDE":
+    for i in range(20):
+        common = {"clip_id": f"{kind}{i}", "event_id": "1", "trial": kind,
+                  "take_id": f"{kind}-take-{i}", "pair_id": "", "区分": kind,
+                  "状態": "静止", "orig_file": f"{kind}{i}",
+                  "orig_duration_s": "10", "cut_offset_s": "0", "scored": "1"}
+        if kind == "C":
+            rows36.append({**common, "class": "none", "quadrant": "",
+                           "t_start": "0", "t_cpa": "10"})
+        else:
+            rows36.append({**common, "class": "car_drive", "quadrant": "L",
+                           "t_start": "1", "t_cpa": "8", "横距離m": "3"})
+for i in range(20):
+    rows36.append({"clip_id": f"walk{i}", "event_id": "1", "trial": "walk",
+                   "class": "car_drive", "quadrant": "L", "t_start": "1",
+                   "t_cpa": "8", "横距離m": "3", "take_id": f"walk-take-{i}",
+                   "pair_id": f"walk-pair-{i % 10}", "区分": "歩行",
+                   "状態": "静止" if i < 10 else "歩行", "orig_file": f"walk{i}",
+                   "orig_duration_s": "10", "cut_offset_s": "0", "scored": "1"})
+for i, (off, a, b) in enumerate(cut.plan_negative_split(6000.0)):
+    rows36.append(cut.negative_row(
+        f"exposure_s{i:04d}", "exposure", off, a, b,
+        {"take_id": "exposure-take", "pair_id": "", "区分": "負例露出", "状態": "静止"},
+        orig_duration_s=6000.0))
+val.errs.clear()
+val.warns.clear()
+import contextlib as _contextlib
+import io as _io
+with _contextlib.redirect_stdout(_io.StringIO()):
+    val.validate(rows36, True, 10.0, dict(val.PLAN_DEFAULT))
+check("T36 計画120テイク＋別枠負例100分がstrict相当で合格",
+      not val.errs and not val.warns,
+      f"(rows={len(rows36)}, errors={val.errs}, warnings={val.warns})")
+
+# ---------------- T37: C負例は別枠100分の代用にならない ----------------
+rows37 = [cut.negative_row(
+    f"c_long_s{i:04d}", "c_long", off, a, b,
+    {"take_id": "C-long-take", "pair_id": "", "区分": "C", "状態": "静止"},
+    orig_duration_s=6000.0)
+    for i, (off, a, b) in enumerate(cut.plan_negative_split(6000.0))]
+val.errs.clear()
+val.warns.clear()
+plan37 = dict.fromkeys(val.PLAN_DEFAULT, 0)
+plan37["C"] = 1
+with _contextlib.redirect_stdout(_io.StringIO()):
+    val.validate(rows37, True, 10.0, plan37)
+check("T37 C負例が100分あっても区分=負例露出が0分ならstrict相当で不合格",
+      not val.errs and any("区分=負例露出" in w and "0.0分" in w for w in val.warns),
+      f"(errors={val.errs}, warnings={val.warns})")
 
 print()
 if fails:

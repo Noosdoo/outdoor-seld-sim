@@ -24,6 +24,13 @@
   長時間の負例など、原本(96kHz)を丸ごとメモリに載せられない場合は
   `step19 --gain-only` でゲインだけ先に求め、本スクリプトに `--gain-db` で渡す
   （このとき入力は96kHz原本でよく、切り出した10秒だけを24kHzへ変換する）。
+  24kHz変換済みでない入力では --gain-db/--pitch/--roll/--yaw の明示指定を必須とし、
+  指定忘れをエラーにする（値が0のときも各引数を明示する）。
+
+注釈の計画列:
+  take_id / 区分 / 状態は必須。歩行区分では pair_id も必須。
+  切り出し後は orig_file / orig_duration_s / cut_offset_s / scored を自動付与する。
+  連続負例100分は区分=負例露出とし、計画120テイクとは別に数える。
 
 使い方:
   # ①イベント切り出し（較正済み24kHzを入力）
@@ -69,7 +76,8 @@ EPS = 1e-9
 
 # 注釈スキーマ（step19c_ann_validate.py と共有する正）
 BASE_COLS = ["clip_id", "event_id", "trial", "class", "quadrant", "t_start", "t_cpa"]
-CUT_COLS = ["orig_file", "cut_offset_s", "scored"]
+PLAN_COLS = ["take_id", "pair_id", "区分", "状態"]
+CUT_COLS = ["orig_file", "orig_duration_s", "cut_offset_s", "scored"]
 DIST_CLASSES = {"car_drive", "kick", "bike"}
 
 
@@ -83,6 +91,21 @@ def orig_key(name: str) -> str:
     """ファイル名/クリップ名を原録音キーに正規化（_conv 接尾を落とす）。"""
     stem = Path(name).stem
     return stem[:-5] if stem.endswith("_conv") else stem
+
+
+def require_raw_metadata(input_fs: int, argv=None) -> None:
+    """24kHz変換済みでない入力では、較正値と3軸角の明示指定を必須にする。
+
+    角度0°やゲイン0dB自体は有効なので値ではなく、CLIで明示された事実を検査する。
+    これにより原本を直接切る際の「指定し忘れ」を黙って通さない。"""
+    if input_fs == FS_OUT:
+        return
+    argv = sys.argv if argv is None else argv
+    required = ("--gain-db", "--pitch", "--roll", "--yaw")
+    missing = [name for name in required if name not in argv]
+    if missing:
+        raise ValueError("原本から直接切り出す場合は較正ゲインと回転角を明示してください: "
+                         + " ".join(missing))
 
 
 # ------------------------------------------------------------------ 切り出し計画
@@ -133,7 +156,7 @@ def plan_negative_split(length_s: float, dur: float = DUR,
 
 # ------------------------------------------------------------------ 注釈の再基準化
 def rebase_rows(rows, off: float, dur: float, orig: str, new_clip: str,
-                target_event=None, own=None):
+                target_event=None, own=None, orig_duration_s=None):
     """原録音時刻の注釈行を、切り出しクリップの時刻へ移す。
 
     重要: **1つの物理イベントはちょうど1クリップでだけ採点される**ようにする。
@@ -163,6 +186,8 @@ def rebase_rows(rows, off: float, dur: float, orig: str, new_clip: str,
         nr["t_start"] = f"{min(max(t0 - off, 0.0), dur):.2f}"
         nr["t_cpa"] = f"{min(max(t1 - off, 0.0), dur):.2f}"
         nr["orig_file"] = orig
+        nr["orig_duration_s"] = (f"{orig_duration_s:.3f}"
+                                 if orig_duration_s is not None else "")
         nr["cut_offset_s"] = f"{off:.3f}"
         nr["scored"] = str(scored)
         out.append(nr)
@@ -170,11 +195,14 @@ def rebase_rows(rows, off: float, dur: float, orig: str, new_clip: str,
 
 
 def negative_row(new_clip: str, orig: str, off: float, own0: float, own1: float,
-                 template=None):
+                 template=None, orig_duration_s=None):
     r = dict(template or {})
     r.update({"clip_id": new_clip, "event_id": "n1", "class": "none",
               "quadrant": "", "t_start": f"{own0:.3f}", "t_cpa": f"{own1:.3f}",
-              "orig_file": orig, "cut_offset_s": f"{off:.3f}", "scored": "1"})
+              "orig_file": orig,
+              "orig_duration_s": (f"{orig_duration_s:.3f}"
+                                  if orig_duration_s is not None else ""),
+              "cut_offset_s": f"{off:.3f}", "scored": "1"})
     r.setdefault("trial", "neg")
     return r
 
@@ -246,6 +274,9 @@ def _write_ann(path: Path, rows, append: bool = False):
         rows = [r for r in prev
                 if (r["clip_id"], r.get("event_id", "")) not in seen] + list(rows)
     cols = list(BASE_COLS)
+    for c in PLAN_COLS:
+        if any(c in r for r in rows):
+            cols.append(c)
     for r in rows:
         for k in r:
             if k not in cols:
@@ -292,6 +323,8 @@ def main() -> int:
         orig = orig_key(path.name)
         with sf.SoundFile(str(path)) as f:
             length = len(f) / f.samplerate
+            input_fs = f.samplerate
+        require_raw_metadata(input_fs)
         rows = by_orig.get(orig, [])
         if mode == "event":
             events = [r for r in rows if r["class"].strip() != "none"]
@@ -305,7 +338,7 @@ def main() -> int:
                 cut_audio(path, off, dur, out_dir / f"{new_clip}.flac", gain_db,
                           **rot)
                 out_rows += rebase_rows(rows, off, dur, orig, new_clip,
-                                        target_event=ev)
+                                        target_event=ev, orig_duration_s=length)
                 n_clip += 1
                 print(f"  {new_clip}: off={off:.3f}s CPA→{float(r['t_cpa'])-off:.2f}s"
                       + ("  ⚠端でクランプ" if abs(off - (float(r['t_cpa']) - cpa_at)) > 1e-6
@@ -317,9 +350,10 @@ def main() -> int:
                 new_clip = f"{orig}_s{i:03d}"
                 cut_audio(path, off, dur, out_dir / f"{new_clip}.flac", gain_db,
                           **rot)
-                out_rows.append(negative_row(new_clip, orig, off, own0, own1, tmpl))
+                out_rows.append(negative_row(new_clip, orig, off, own0, own1, tmpl,
+                                             orig_duration_s=length))
                 out_rows += rebase_rows(rows, off, dur, orig, new_clip,
-                                        own=(own0, own1))
+                                        own=(own0, own1), orig_duration_s=length)
                 n_clip += 1
             cov = sum(b - a for _, a, b in plan)
             print(f"  {orig}: {len(plan)}クリップ 担当合計={cov:.2f}s "

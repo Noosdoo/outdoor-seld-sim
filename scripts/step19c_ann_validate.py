@@ -5,17 +5,20 @@
 現場で作った注釈の取りこぼしを、帰宅後その日のうちに潰すための道具。
 
 検査項目:
-  S1 必須列の存在（--cut 指定時は orig_file / cut_offset_s / scored も必須）
+  S1 必須列の存在（計画列 take_id / 区分 / 状態を含む。--cut 指定時は
+     orig_file / orig_duration_s / cut_offset_s / scored も必須）
   S2 (clip_id, event_id) の一意性
   S3 class が既知クラス∪none／quadrant が F/B/L/R（正例のみ）
   S4 t_start ≤ t_cpa、いずれも [0, --dur] の範囲内
   S5 距離クラス(car_drive/kick/bike)の採点対象行に有限・非負の 横距離m がある
-  S6 cut_offset_s が非負の数、orig_file が非空（--cut時）
-  S6 cut_offset_s が非負の数、orig_file が非空、scored が 0/1（**負例行も含め全行**）
+  S6 cut_offset_s / orig_duration_s が有効、orig_file が非空、scored が0/1
+     （**負例行も含め全行**）
   S7 **負例の担当区間が原録音上で先頭0sから末尾まで隙間なく・重なりなくタイルすること**
      （step19b --mode negative の重複分割が正しく効いているかの一発検査。
        ここが崩れていると誤警告の二重計上/取りこぼしが起きる）
-  S8 事前登録との突き合わせ（区分A〜E・歩行の本数、歩行対比の静止/歩行が同数か）
+  S8 事前登録との突き合わせ（切り出しclip数ではなく take_id 単位）。
+     区分A〜E・歩行の本数、歩行対比の pair_id ごとの静止/歩行1本ずつを検査。
+     100分連続負例は区分=負例露出とし、120本の計画数から分離する
 
 使い方:
   python scripts/step19c_ann_validate.py --ann out/realsmoke/ann_all.csv --cut
@@ -35,14 +38,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE_COLS = ["clip_id", "event_id", "trial", "class", "quadrant", "t_start", "t_cpa"]
-CUT_COLS = ["orig_file", "cut_offset_s", "scored"]
+BASE_COLS = ["clip_id", "event_id", "trial", "class", "quadrant", "t_start", "t_cpa",
+             "take_id", "区分", "状態"]
+CUT_COLS = ["orig_file", "orig_duration_s", "cut_offset_s", "scored"]
 CLASSES = {"siren", "horn", "backup_beep", "bike_bell", "car_drive", "crossing",
            "kick", "bike"}
 DIST_CLASSES = {"car_drive", "kick", "bike"}
 QUADS = {"F", "B", "L", "R"}
 LATERAL_KEYS = ("横距離m", "横距離", "lateral_m")
 PLAN_DEFAULT = {"A": 20, "B": 20, "C": 20, "D": 20, "E": 20, "歩行": 20}
+EXPOSURE_KIND = "負例露出"
+STATES = {"静止", "歩行"}
 EPS = 1e-6
 
 errs, warns = [], []
@@ -99,6 +105,22 @@ def validate(rows, cut: bool, dur: float, plan: dict):
         cid, ev = r["clip_id"].strip(), str(r.get("event_id", "")).strip()
         cls = r["class"].strip()
         tag = f"L{i} {cid}/{ev}"
+        take_id = r.get("take_id", "").strip()
+        kind = r.get("区分", "").strip()
+        state = r.get("状態", "").strip()
+        if not take_id:
+            err(f"S1 {tag}: take_id が空です（物理的な収録テイクを識別できません）")
+        if kind not in set(plan) | {EXPOSURE_KIND}:
+            err(f"S8 {tag}: 区分は A〜E/歩行/{EXPOSURE_KIND} "
+                f"（現在 '{kind}'）")
+        if state not in STATES:
+            err(f"S8 {tag}: 状態は 静止/歩行（現在 '{state}'）")
+        if kind in set(plan) - {"歩行"} and state != "静止":
+            err(f"S8 {tag}: 共通試験の区分{kind}は状態=静止でなければなりません")
+        if kind == EXPOSURE_KIND and cls != "none":
+            err(f"S8 {tag}: 区分={EXPOSURE_KIND}には class=none だけを置けます")
+        if kind == "歩行" and not r.get("pair_id", "").strip():
+            err(f"S8 {tag}: 歩行対比には pair_id が必須です")
         if (cid, ev) in seen:
             err(f"S2 {tag}: (clip_id,event_id) が重複しています")
         seen.add((cid, ev))
@@ -120,10 +142,14 @@ def validate(rows, cut: bool, dur: float, plan: dict):
             if fnum(r.get("cut_offset_s")) is None or fnum(r["cut_offset_s"]) < -EPS:
                 err(f"S6 {tag}: cut_offset_s が非負の数値ではありません "
                     f"（現在 '{r.get('cut_offset_s','')}'）")
+            odur = fnum(r.get("orig_duration_s"))
+            if odur is None or odur <= 0:
+                err(f"S6 {tag}: orig_duration_s が正の有限値ではありません "
+                    f"（現在 '{r.get('orig_duration_s','')}'）")
             sv = str(r.get("scored", "")).strip().lower()
-            if sv not in ("", "0", "1", "true", "false", "yes", "no"):
+            if sv not in ("0", "1"):
                 err(f"S6 {tag}: scored の値が不正です（'{r.get('scored')}'）。"
-                    "0/1 以外は採点側が採点対象と誤認します")
+                    "0/1 のどちらかを指定してください")
         if cls == "none":
             if not is_scored(r):
                 err(f"S6 {tag}: 負例行に scored=0 は使えません"
@@ -145,23 +171,27 @@ def validate(rows, cut: bool, dur: float, plan: dict):
                 continue
             off = fnum(r.get("cut_offset_s"))
             t0, t1 = fnum(r["t_start"]), fnum(r["t_cpa"])
-            if None in (off, t0, t1):
+            odur = fnum(r.get("orig_duration_s"))
+            if None in (off, t0, t1, odur):
                 continue
             segs[r["orig_file"].strip()].append((off + t0, off + t1,
-                                                 r["clip_id"].strip()))
+                                                 r["clip_id"].strip(), odur))
         for orig, ss in sorted(segs.items()):
             ss.sort()
-            total = sum(b - a for a, b, _ in ss)
+            total = sum(b - a for a, b, _, _ in ss)
+            durations = {round(x[3], 6) for x in ss}
+            expected_end = ss[0][3]
+            if len(durations) != 1:
+                err(f"S7 {orig}: orig_duration_s がクリップ間で不一致です "
+                    f"({sorted(durations)})")
             if abs(ss[0][0]) > EPS:
                 err(f"S7 {orig}: 担当が原録音の先頭0.000sから始まっていません"
                     f"（{ss[0][0]:.3f}sから）→ 冒頭の誤警告を取りこぼします")
-            last_local = fnum(next(r["t_cpa"] for r in rows
-                                   if r["clip_id"].strip() == ss[-1][2]))
-            if last_local is not None and abs(last_local - dur) > EPS:
-                err(f"S7 {orig}: 末尾クリップ {ss[-1][2]} の担当が"
-                    f"クリップ終端({dur}s)まで届いていません（{last_local:.3f}s）"
+            if abs(ss[-1][1] - expected_end) > EPS:
+                err(f"S7 {orig}: 担当終端 {ss[-1][1]:.3f}s が原録音長"
+                    f" {expected_end:.3f}s に届いていません"
                     "→ 録音末尾の誤警告を取りこぼします")
-            for (a1, b1, c1), (a2, b2, c2) in zip(ss, ss[1:]):
+            for (a1, b1, c1, _), (a2, b2, c2, _) in zip(ss, ss[1:]):
                 if a2 < b1 - EPS:
                     err(f"S7 {orig}: 担当区間が重複 {c1}[{a1:.3f},{b1:.3f}) と "
                         f"{c2}[{a2:.3f},{b2:.3f}) → 誤警告を二重計上します")
@@ -169,35 +199,49 @@ def validate(rows, cut: bool, dur: float, plan: dict):
                     err(f"S7 {orig}: 担当区間に隙間 [{b1:.3f},{a2:.3f}) "
                         f"（{c1}と{c2}の間）→ その区間の誤警告を取りこぼします")
             print(f"  S7 {orig}: {len(ss)}クリップ 担当合計 {total:.2f}s "
-                  f"（{ss[0][0]:.2f}〜{ss[-1][1]:.2f}s 連続）")
+                  f"（{ss[0][0]:.2f}〜{ss[-1][1]:.2f}s / 原録音{expected_end:.2f}s）")
 
-    # ---- S8 事前登録との突き合わせ ----
+    # ---- S8 事前登録との突き合わせ（物理テイク単位） ----
     clips = {}
-    for r in rows:
+    takes = {}
+    take_signature = {}
+    for i, r in enumerate(rows, start=2):
         clips.setdefault(r["clip_id"].strip(), r)
-    if any("区分" in r for r in rows):
-        def kind(r):
-            v = r.get("区分", "").strip()
-            return v if v in plan else v[:1]
-        got = Counter(kind(r) for r in clips.values())
-        for k in sorted(plan):
-            if got.get(k, 0) != plan[k]:
-                warn(f"S8 区分{k}: {got.get(k,0)}本（計画 {plan[k]}本）")
-        print("  S8 区分別クリップ数: "
-              + " ".join(f"{k}={got.get(k,0)}" for k in sorted(plan))
-              + f"  計{sum(got.get(k,0) for k in plan)}本（計画 {sum(plan.values())}本）")
-        # 歩行対比は静止版・歩行版が対で揃っていなければ比較が成立しない
-        walk = [r for r in clips.values() if kind(r) == "歩行"]
-        if walk:
-            st = Counter(r.get("状態", "").strip() for r in walk)
-            if st.get("静止", 0) != st.get("歩行", 0):
-                err(f"S8 歩行対比が対になっていません（静止{st.get('静止',0)}・"
-                    f"歩行{st.get('歩行',0)}）。対応比較には同数が必要です")
-            if len(walk) != plan.get("歩行", 20):
-                warn(f"S8 歩行対比: {len(walk)}本（計画 {plan.get('歩行',20)}本）")
-    if any("状態" in r for r in rows):
-        st = Counter(r.get("状態", "").strip() for r in clips.values() if r.get("状態"))
-        print("  S8 状態別クリップ数: " + " ".join(f"{k}={v}" for k, v in sorted(st.items())))
+        tid = r.get("take_id", "").strip()
+        if not tid:
+            continue
+        physical_source = (r.get("orig_file", "").strip() if cut
+                           else r.get("clip_id", "").strip())
+        sig = (r.get("区分", "").strip(), r.get("状態", "").strip(),
+               r.get("pair_id", "").strip(), physical_source)
+        if tid in take_signature and take_signature[tid] != sig:
+            err(f"S8 L{i}: take_id={tid} の区分/状態/pair_id/原録音が行間で不一致です "
+                f"({take_signature[tid]} vs {sig})")
+        take_signature.setdefault(tid, sig)
+        takes.setdefault(tid, r)
+
+    got = Counter(r.get("区分", "").strip() for r in takes.values())
+    for k in sorted(plan):
+        if got.get(k, 0) != plan[k]:
+            warn(f"S8 区分{k}: {got.get(k,0)}テイク（計画 {plan[k]}テイク）")
+    planned_total = sum(got.get(k, 0) for k in plan)
+    print("  S8 区分別テイク数: "
+          + " ".join(f"{k}={got.get(k,0)}" for k in sorted(plan))
+          + f"  計{planned_total}テイク（計画 {sum(plan.values())}テイク）"
+          + f" / {EXPOSURE_KIND}={got.get(EXPOSURE_KIND,0)}テイク")
+
+    # 歩行対比は件数だけでなく、pair_idごとに静止1・歩行1を要求する。
+    walk = [r for r in takes.values() if r.get("区分", "").strip() == "歩行"]
+    pairs = defaultdict(list)
+    for r in walk:
+        pairs[r.get("pair_id", "").strip()].append(r)
+    for pair_id, pair_rows in sorted(pairs.items()):
+        st = Counter(r.get("状態", "").strip() for r in pair_rows)
+        if not pair_id or st != Counter({"静止": 1, "歩行": 1}):
+            err(f"S8 歩行対比 pair_id='{pair_id}' は静止1・歩行1でなければなりません "
+                f"（現在 静止{st.get('静止',0)}・歩行{st.get('歩行',0)}・計{len(pair_rows)}）")
+    st = Counter(r.get("状態", "").strip() for r in takes.values())
+    print("  S8 状態別テイク数: " + " ".join(f"{k}={v}" for k, v in sorted(st.items())))
 
     # ---- 集計表示 ----
     pos = [r for r in rows if r["class"].strip() != "none"]
@@ -210,17 +254,23 @@ def validate(rows, cut: bool, dur: float, plan: dict):
                  ("caution" if m is not None and m <= 3.2 else "safe")] += 1
         else:
             tier["warn"] += 1
-    neg_s = sum((fnum(r["t_cpa"]) or 0) - (fnum(r["t_start"]) or 0)
-                for r in rows if r["class"].strip() == "none")
+    neg_all_s = sum((fnum(r["t_cpa"]) or 0) - (fnum(r["t_start"]) or 0)
+                    for r in rows if r["class"].strip() == "none")
+    exposure_s = sum((fnum(r["t_cpa"]) or 0) - (fnum(r["t_start"]) or 0)
+                     for r in rows
+                     if r["class"].strip() == "none"
+                     and r.get("区分", "").strip() == EXPOSURE_KIND)
     print(f"\n  クリップ {len(clips)} / 行 {len(rows)}"
           f"（正例 {len(pos)}・うち採点対象 {len(scored)}）")
     print("  GT区分: " + " ".join(f"{k}={tier[k]}" for k in
                                   ("critical", "caution", "safe", "warn")))
     print(f"  クラス: " + " ".join(f"{k}={v}" for k, v in
                                    sorted(Counter(r['class'].strip() for r in pos).items())))
-    print(f"  負例露出 {neg_s/60.0:.1f}分（事前登録 ≥100分）")
-    if neg_s < 100 * 60 - EPS:
-        warn(f"S8 負例露出が事前登録の100分に届いていません（{neg_s/60.0:.1f}分）")
+    print(f"  負例担当 合計{neg_all_s/60.0:.1f}分 / "
+          f"うち区分={EXPOSURE_KIND} {exposure_s/60.0:.1f}分（事前登録 ≥100分）")
+    if exposure_s < 100 * 60 - EPS:
+        warn(f"S8 区分={EXPOSURE_KIND}が事前登録の100分に届いていません"
+             f"（{exposure_s/60.0:.1f}分）")
 
 
 def main() -> int:
