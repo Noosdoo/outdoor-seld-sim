@@ -17,6 +17,16 @@ T13: 【回帰】同一エピソードは強・中として二重割当されな
 T14: 【回帰】エピソード統合は正規規則（フレーム差≤1かつ方位差≤25°）
 T15: 【回帰】横距離欠落の距離クラス行は未採点（分母除外）
 T16: 【回帰】NaN/Infinity/負値の横距離は未採点（有限・非負値のみ有効）
+
+--- 2026-08-14 実録再設計レビュー反映（step19b 切り出し／境界一意化） ---
+T17: 切り出し計画 — 最接近が8s地点／原録音の端でクランプしても範囲内
+T18: 負例の重複分割 — 担当区間が隙間なく・重なりなくタイルし合計=録音長
+T19: cut_audio — 96kHz原本から10秒/24kHzを切り出し、目印が8s地点に来る＋ゲイン適用
+T20: 注釈の再基準化 — 時刻の移動・orig_file/cut_offset_s付与・最接近が外なら scored=0
+T21: 【境界】重複帯の発火は1回だけ数える（半開区間）＋露出合計=録音長
+T22: 【境界】3フレーム連続条件が境界で分断されない（重複なしだと取りこぼす）
+T23: scored=0 行は未採点だが誤警告マスクとしては働く
+T24: --gain-only の較正ゲインが全長変換と一致する（長時間録音の迂回路）
 """
 from __future__ import annotations
 
@@ -41,6 +51,7 @@ def _load(name, rel):
 
 v2 = _load("s20v2", "step20_realsmoke_score_v2.py")
 s19 = _load("s19rc", "step19_realsmoke_convert.py")
+cut = _load("s19bcut", "step19b_realsmoke_cut.py")
 
 fails = []
 n_checks = 0
@@ -228,6 +239,179 @@ check("T16 【回帰】NaN/±Infinity/負値→未採点・0m→有効",
       f"(invalid={[e['notified'] for e in ev16[:4]]}, "
       f"zero={(ev16[4]['gt_tier'], ev16[4]['notified'])}, "
       f"unscored={ex16['n_unscored']})")
+
+# ================= 2026-08-14 追加分（step19b 切り出し／境界一意化） =================
+
+# ---------------- T17: 切り出し計画（CPA@8s・端でクランプ） ----------------
+o_mid = cut.plan_event_cut(t_cpa=20.0, length_s=30.0)          # 20-8=12
+o_head = cut.plan_event_cut(t_cpa=3.0, length_s=30.0)          # 負→0へ
+o_tail = cut.plan_event_cut(t_cpa=29.5, length_s=30.0)         # 21.5→20へ
+check("T17 CPA@8s・端はクランプ（0≤off≤length-dur）",
+      abs(o_mid - 12.0) < 1e-9 and o_head == 0.0 and abs(o_tail - 20.0) < 1e-9,
+      f"(mid={o_mid}, head={o_head}, tail={o_tail})")
+
+# ---------------- T18: 負例分割の担当区間タイル ----------------
+def _tiles_ok(length, dur=10.0, ovl=1.0):
+    plan = cut.plan_negative_split(length, dur, ovl)
+    abs_segs = sorted((s + a, s + b) for s, a, b in plan)
+    if abs(abs_segs[0][0]) > 1e-9 or abs(abs_segs[-1][1] - length) > 1e-9:
+        return False, plan, "端が録音全体を覆っていない"
+    for (a1, b1), (a2, b2) in zip(abs_segs, abs_segs[1:]):
+        if abs(a2 - b1) > 1e-9:
+            return False, plan, f"隙間/重複 {b1}→{a2}"
+    if any(s < -1e-9 or s + dur > length + 1e-9 for s, _, _ in plan):
+        return False, plan, "音声窓が録音外"
+    cov = sum(b - a for _, a, b in plan)
+    return abs(cov - length) < 1e-9, plan, f"cov={cov}"
+
+ok19, p19, note19 = _tiles_ok(19.0)
+ok100, p100, note100 = _tiles_ok(100.0)
+ok_odd, p_odd, note_odd = _tiles_ok(25.5)
+ok_exact, p_ex, note_ex = _tiles_ok(10.0)
+check("T18 担当区間が隙間なく・重なりなくタイル（19s/100s/25.5s/10s）",
+      ok19 and ok100 and ok_odd and ok_exact,
+      f"(19s:{note19} / 100s:{note100} / 25.5s:{note_odd} / 10s:{note_ex})")
+check("T18b 重複帯は前クリップ帰属（後クリップの先頭1sは担当外）",
+      abs(p19[0][1]) < 1e-9 and abs(p19[0][2] - 10.0) < 1e-9
+      and abs(p19[1][1] - 1.0) < 1e-9, f"({p19})")
+
+# ---------------- T19: cut_audio（96kHz→10s/24kHz・位置とゲイン） ----------------
+with tempfile.TemporaryDirectory() as td:
+    import soundfile as sf
+    td = Path(td)
+    fs = 96000
+    n = int(15 * fs)
+    base = np.zeros((n, 4), dtype=np.float32)
+    base[:, 0] = 0.01 * np.sin(2 * np.pi * 300 * np.arange(n) / fs)
+    mark = int(11.0 * fs)                                   # 11秒地点に目印バースト
+    base[mark:mark + int(0.02 * fs), :] = 0.2   # ×2してもPCM_24でクリップしない振幅
+    src = td / "raw96k.wav"
+    sf.write(src, base, fs, subtype="FLOAT")
+    out = cut.cut_audio(src, start_s=3.0, dur_s=10.0, out_path=td / "c.flac")
+    y, sr_o = sf.read(out)
+    pk = int(np.argmax(np.abs(y[:, 0])))
+    out_g = cut.cut_audio(src, 3.0, 10.0, td / "cg.flac", gain_db=6.0206)
+    yg, _ = sf.read(out_g)
+    check("T19 96kHz原本→10s/24kHz・目印が8.0s地点・ゲイン+6dBで2倍",
+          sr_o == 24000 and len(y) == 240000 and abs(pk / 24000 - 8.0) < 0.01
+          and abs(float(np.max(np.abs(yg))) / float(np.max(np.abs(y))) - 2.0) < 0.02,
+          f"(fs={sr_o}, n={len(y)}, peak={pk/24000:.3f}s)")
+
+# ---------------- T20: 注釈の再基準化 ----------------
+rows20 = [
+    {"clip_id": "takeA", "event_id": "1", "trial": "t1", "class": "car_drive",
+     "quadrant": "L", "t_start": "16", "t_cpa": "20", "横距離m": "2.5"},
+    {"clip_id": "takeA", "event_id": "2", "trial": "t1", "class": "car_drive",
+     "quadrant": "R", "t_start": "21", "t_cpa": "25", "横距離m": "3.0"},
+    {"clip_id": "takeA", "event_id": "3", "trial": "t1", "class": "bike_bell",
+     "quadrant": "B", "t_start": "0.5", "t_cpa": "2.0"},
+]
+nb = cut.rebase_rows(rows20, off=12.0, dur=10.0, orig="takeA",
+                     new_clip="takeA_e1", target_event="1")
+by_ev = {r["event_id"]: r for r in nb}
+check("T20 時刻の再基準化・cut_offset_s付与・範囲外イベントは除外",
+      len(nb) == 2 and by_ev["1"]["t_cpa"] == "8.00"
+      and by_ev["1"]["t_start"] == "4.00"
+      and by_ev["1"]["cut_offset_s"] == "12.000"
+      and by_ev["1"]["orig_file"] == "takeA"
+      and by_ev["1"]["clip_id"] == "takeA_e1" and "3" not in by_ev,
+      f"({[(r['event_id'], r['t_start'], r['t_cpa'], r['scored']) for r in nb]})")
+check("T20b 最接近がクリップ外の行は scored=0（マスク専用で残す）",
+      by_ev["2"]["scored"] == "0" and by_ev["1"]["scored"] == "1"
+      and by_ev["2"]["t_start"] == "9.00" and by_ev["2"]["t_cpa"] == "10.00",
+      f"(ev2={by_ev['2']['t_start']}-{by_ev['2']['t_cpa']}/{by_ev['2']['scored']})")
+
+# 1つの物理イベントが2クリップで二重採点されないこと（切り出し窓は重なる）
+rows20b = [
+    {"clip_id": "takeC", "event_id": "1", "trial": "t1", "class": "car_drive",
+     "quadrant": "L", "t_start": "10", "t_cpa": "12", "横距離m": "2.0"},
+    {"clip_id": "takeC", "event_id": "2", "trial": "t1", "class": "car_drive",
+     "quadrant": "R", "t_start": "14", "t_cpa": "16", "横距離m": "2.0"},
+]
+cutA = cut.rebase_rows(rows20b, off=4.0, dur=10.0, orig="takeC",
+                       new_clip="takeC_e1", target_event="1")   # 窓 4〜14s
+cutB = cut.rebase_rows(rows20b, off=8.0, dur=10.0, orig="takeC",
+                       new_clip="takeC_e2", target_event="2")   # 窓 8〜18s
+scored_pairs = [(r["clip_id"], r["event_id"]) for r in cutA + cutB
+                if r["scored"] == "1"]
+check("T20c 同じイベントが2クリップで二重採点されない（主対象だけ採点）",
+      sorted(scored_pairs) == [("takeC_e1", "1"), ("takeC_e2", "2")],
+      f"({sorted(scored_pairs)})")
+
+# 負例分割では「最接近を担当区間に持つクリップ」だけが採点する
+rows20d = [{"clip_id": "neg", "event_id": "1", "trial": "n", "class": "bike_bell",
+            "quadrant": "F", "t_start": "9.4", "t_cpa": "9.7"}]
+d0 = cut.rebase_rows(rows20d, 0.0, 10.0, "neg", "neg_s000", own=(0.0, 10.0))
+d1 = cut.rebase_rows(rows20d, 9.0, 10.0, "neg", "neg_s001", own=(1.0, 10.0))
+check("T20d 負例分割は担当区間が最接近を含むクリップだけ採点",
+      len(d0) == 1 and d0[0]["scored"] == "1"
+      and len(d1) == 1 and d1[0]["scored"] == "0",
+      f"(s000={d0[0]['scored']}, s001={d1[0]['scored']})")
+
+# ---------------- T21: 境界発火の一意化＋露出合計 ----------------
+# 19秒の負例を dur=10/overlap=1 で分割した想定（clip0=担当0-10, clip1=担当1-10）
+plan21 = cut.plan_negative_split(19.0, 10.0, 1.0)
+rows21 = [cut.negative_row(f"neg_s{i:03d}", "neg", off, a, b)
+          for i, (off, a, b) in enumerate(plan21)]
+# 絶対10.0秒に警告音の発火（clip0では因果時刻10.0、clip1では1.0）
+pred21 = {"neg_s000": {97: [(0, 0.0, None)], 98: [(0, 0.0, None)],
+                       99: [(0, 0.0, None)]},
+          "neg_s001": {7: [(0, 0.0, None)], 8: [(0, 0.0, None)],
+                       9: [(0, 0.0, None)]}}
+_, neg21, _ = v2.evaluate(rows21, pred21, link_deg=60.0, has_dist=True)
+check("T21 重複帯の同一発火は1回だけ・露出合計=録音長19s",
+      neg21["n_false"] == 1 and abs(neg21["exposure_s"] - 19.0) < 1e-9,
+      f"(false={neg21['n_false']}, exp={neg21['exposure_s']})")
+
+# ---------------- T22: 境界をまたぐ連続条件が分断されない ----------------
+# 絶対 9.8/9.9/10.0 秒の3フレーム連続。clip0は9.9までしか音がない
+pred22_ovl = {"neg_s000": {98: [(0, 0.0, None)], 99: [(0, 0.0, None)]},
+              "neg_s001": {8: [(0, 0.0, None)], 9: [(0, 0.0, None)],
+                           10: [(0, 0.0, None)]}}
+_, n22a, _ = v2.evaluate(rows21, pred22_ovl, link_deg=60.0, has_dist=True)
+# 重複なし(step=dur)だと後クリップは絶対10.0から始まり1フレームしか見えない
+plan22b = cut.plan_negative_split(19.0, 10.0, 0.0)
+rows22b = [cut.negative_row(f"nb_s{i:03d}", "nb", off, a, b)
+           for i, (off, a, b) in enumerate(plan22b)]
+pred22b = {"nb_s000": {98: [(0, 0.0, None)], 99: [(0, 0.0, None)]},
+           "nb_s001": {0: [(0, 0.0, None)]}}
+_, n22b, _ = v2.evaluate(rows22b, pred22b, link_deg=60.0, has_dist=True)
+check("T22 重複1sなら境界またぎの3フレーム連続を検出（重複なしは取りこぼす）",
+      n22a["n_false"] == 1 and n22b["n_false"] == 0,
+      f"(重複あり={n22a['n_false']}, 重複なし={n22b['n_false']})")
+
+# ---------------- T23: scored=0 は未採点だがマスクとして働く ----------------
+rows23 = [
+    {"clip_id": "c8", "event_id": "1", "trial": "t1", "class": "car_drive",
+     "quadrant": "F", "t_start": "9.0", "t_cpa": "10.0", "横距離m": "2.5",
+     "scored": "0"},
+    {"clip_id": "c8", "event_id": "n1", "trial": "neg", "class": "none",
+     "quadrant": "", "t_start": "0", "t_cpa": "10", "scored": "1"},
+]
+pred23 = {"c8": {90: [(4, 0.0, 2.0)], 91: [(4, 0.0, 2.0)]}}   # 因果9.2sに中通知
+ev23, neg23, ex23 = v2.evaluate(rows23, pred23, link_deg=60.0, has_dist=True)
+check("T23 scored=0は未採点（分母外）だが誤警告マスクとしては有効",
+      ev23[0]["notified"] is None and ex23["n_maskonly"] == 1
+      and neg23["n_false"] == 0 and abs(neg23["exposure_s"] - 8.0) < 1e-9,
+      f"(notified={ev23[0]['notified']}, maskonly={ex23['n_maskonly']}, "
+      f"false={neg23['n_false']}, exp={neg23['exposure_s']})")
+
+# ---------------- T24: --gain-only が全長変換と同じゲインを出す ----------------
+with tempfile.TemporaryDirectory() as td:
+    import soundfile as sf
+    td = Path(td)
+    fs = 96000
+    t = np.arange(3 * fs) / fs
+    w = 0.03 * np.sin(2 * np.pi * 1000 * t)
+    sf.write(td / "g.wav", np.stack([w, 0.2 * w, 0.1 * w, 0.3 * w], axis=1), fs,
+             subtype="FLOAT")
+    g_stream = s19.calib_gain_db(td / "g.wav", laeq=55.0, win=(0.5, 2.5))
+    wav, sr = sf.read(td / "g.wav", dtype="float64")
+    from scipy.signal import resample_poly as _rp
+    w24 = _rp(wav[:, 0], 1, 4)
+    g_full = 55.0 - s19.spl_a(w24[int(0.5 * 24000):int(2.5 * 24000)], 24000)
+    check("T24 --gain-only の較正ゲインが全長変換と一致（±0.1dB）",
+          abs(g_stream - g_full) < 0.1, f"(stream={g_stream:+.3f}, full={g_full:+.3f})")
 
 print()
 if fails:

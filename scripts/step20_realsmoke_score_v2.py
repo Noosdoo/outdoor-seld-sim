@@ -22,11 +22,16 @@ GT区分（注釈の横距離mから）: critical ≤1.5 / caution ≤3.2 / safe
   - safe    : 窓内に**強・中いずれの通知も無い**こと=成功
               （安全車への通知は段階を問わず失敗。正規の抑制定義と同一）
   - 横距離m欠落/不正の距離クラス行は**未採点**（分母から除外・件数を警告表示）
+  - scored=0 の行も**未採点**（step19bの切り出しで最接近がクリップ外になった行。
+    誤警告マスクには使うが到達判定の分母には入れない）
 負例(class=none): エピソード単位で計数・注釈イベント窓をマスク・露出は重なり控除。
+  負例窓は**半開区間 [t_start, t_cpa)**（2026-08-14）。step19b --mode negative が
+  重複分割したクリップの担当区間は原録音上で隙間なくタイルするため、境界時刻
+  ちょうどの発火も半開区間により**ちょうど1回**だけ数えられる。
 誤警告率は両側95%CIに加え片側95%上限（事前登録<1.8回/hの判定用）。
 統計: McNemar厳密・クリップ単位paired bootstrap・Poisson厳密区間。
 
-入力列: clip_id,event_id,trial,class,quadrant,t_start,t_cpa[,横距離m,...]
+入力列: clip_id,event_id,trial,class,quadrant,t_start,t_cpa[,横距離m,scored,...]
 予測CSV: 6/7列 [stem,frame,class(,track),az,el,dist]（5列旧形式は警告クラスのみ）
 """
 from __future__ import annotations
@@ -82,6 +87,14 @@ def gt_tier_of(lateral_m):
     if lateral_m <= SUPP:
         return "caution"
     return "safe"
+
+
+def is_scored(row) -> bool:
+    """scored列（step19bが付与）。0/false/noは未採点=マスク専用行。"""
+    v = row.get("scored")
+    if v is None or str(v).strip() == "":
+        return True
+    return str(v).strip().lower() not in ("0", "false", "no")
 
 
 def lateral_of(row):
@@ -232,7 +245,8 @@ def evaluate(rows, pred, link_deg, has_dist):
         return total
 
     events, n_false, exposure_s = [], 0, 0.0
-    extras = {"n_strong_on_caution": 0, "n_mid_on_safe": 0, "n_unscored": 0}
+    extras = {"n_strong_on_caution": 0, "n_mid_on_safe": 0, "n_unscored": 0,
+              "n_maskonly": 0}
     by_key = defaultdict(list)
     for r in rows:
         clip = r["clip_id"]
@@ -243,8 +257,21 @@ def evaluate(rows, pred, link_deg, has_dist):
             for grp in fires_by_clip[clip].values():
                 fires_all += [ep["t_mid"] for ep in grp.get("episodes", [])]
                 fires_all += [t for t, _ in grp.get("warn", [])]
+            # 半開区間 [t0, t1): 重複分割した隣接クリップの担当が原録音上で
+            # 隙間なくタイルするため、境界時刻の発火も一意に1回だけ数えられる
             n_false += sum(1 for t in fires_all
-                           if t0 <= t <= t1 and not masked(clip, t))
+                           if t0 <= t < t1 and not masked(clip, t))
+            continue
+        if not is_scored(r):
+            # 最接近がクリップ外＝到達判定はできないが、pos_windowsには既に
+            # 入っているので誤警告マスクとしては働く（本物のイベントを
+            # 誤警告に数えないため行を消してはいけない）
+            extras["n_maskonly"] += 1
+            events.append({"clip": clip, "trial": r.get("trial", ""),
+                           "event_id": r.get("event_id", "1"),
+                           "class": r["class"].strip(), "gt_tier": "mask",
+                           "notified": None, "fired_tier": None,
+                           "lead": None, "quad_ok": None})
             continue
         by_key[(clip, r["class"].strip())].append(r)
 
@@ -402,6 +429,9 @@ def main() -> int:
         rep.append(f"- safe車への中通知（失敗の内訳・別掲）: {extras['n_mid_on_safe']}件")
     if extras["n_unscored"]:
         rep.append(f"- ⚠️横距離m欠落で未採点（分母除外）: {extras['n_unscored']}件")
+    if extras["n_maskonly"]:
+        rep.append(f"- scored=0（最接近がクリップ外・マスク専用）: "
+                   f"{extras['n_maskonly']}件")
     rep += [(f"- リード中央値 {np.median(leads):.1f}s（範囲 {min(leads):.1f}〜"
              f"{max(leads):.1f}s、注釈±1s精度）" if leads else "- リード: n/a"),
             (f"- 方向4象限一致 {sum(quads)}/{len(quads)}" if quads else "- 象限: n/a")]

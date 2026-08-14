@@ -100,7 +100,7 @@ for i, (no, name, body) in enumerate(steps):
 tb = sl.shapes.add_textbox(Pt(70), Pt(456), Pt(830), Pt(22))
 tb.text_frame.word_wrap = False
 para(tb.text_frame,
-     [("実働2日＋注釈半日・計65本（計画値）", {"size": 11, "bold": True, "color": INK}),
+     [("実働3日＋注釈1日・計120本＝共通100＋歩行対比20（計画値）", {"size": 11, "bold": True, "color": INK}),
       ("　※1テイクの具体的な手順は付録「実録の流れ」を参照", {"size": 10.5, "color": MUTED})],
      first=True)
 

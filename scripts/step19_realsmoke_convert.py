@@ -54,6 +54,26 @@ def rot_matrix(pitch_deg: float, roll_deg: float, yaw_deg: float) -> np.ndarray:
     return Ry @ Rr @ Rp
 
 
+def calib_gain_db(path: Path, laeq: float, win: tuple) -> float:
+    """較正ゲイン[dB]だけを、LAeq窓の区間**だけ**読んで求める。
+
+    長時間の負例録音（例: 30分×96kHz×4ch）は全長をメモリに載せられないため、
+    ゲインだけ先に求めて step19b_realsmoke_cut.py --gain-db に渡す経路を用意する。"""
+    with sf.SoundFile(str(path)) as f:
+        sr, n_total = f.samplerate, len(f)
+        assert f.channels == 4, f"{path.name}: 4ch(AmbiX)ではありません"
+        assert sr in (96000, 48000, 24000), f"{path.name}: 想定外のfs={sr}"
+        a, b = int(win[0] * sr), int(win[1] * sr)
+        assert b <= n_total, "laeq-windowが録音長を超えています"
+        f.seek(a)
+        seg = f.read(b - a, dtype="float64", always_2d=True)[:, 0]
+    down = sr // FS_OUT
+    if down > 1:
+        seg = resample_poly(seg, 1, down)
+    measured = spl_a(seg, FS_OUT)
+    return float(laeq - measured)
+
+
 def convert(path: Path, out_dir: Path, laeq: float, win: tuple,
             pitch: float, roll: float, yaw: float) -> Path:
     wav, sr = sf.read(path, dtype="float64")
@@ -95,7 +115,18 @@ def main() -> int:
     yaw = float(_arg("--yaw", "0"))
     files = sorted(src.glob("*.wav")) if src.is_dir() else [src]
     assert files, f"wavが見つかりません: {src}"
+    if "--gain-only" in sys.argv:
+        # 長時間録音用: 全長を読まずにゲインだけ出す（step19b --gain-db へ渡す）
+        for f in files:
+            print(f"{f.name}: gain-db {calib_gain_db(f, laeq, win):+.2f}")
+        return 0
     for f in files:
+        with sf.SoundFile(str(f)) as sfh:
+            secs = len(sfh) / sfh.samplerate
+        assert secs <= 600.0, (
+            f"{f.name}: {secs/60:.1f}分は全長変換にはメモリ的に長すぎます。"
+            "`--gain-only` でゲインを求め、step19b_realsmoke_cut.py --gain-db で"
+            "切り出しながら変換してください")
         convert(f, out_dir, laeq, win, pitch, roll, yaw)
     return 0
 
