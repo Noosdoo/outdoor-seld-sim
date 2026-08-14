@@ -39,6 +39,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -49,6 +50,15 @@ from scipy.signal import resample_poly
 ROOT = Path(__file__).resolve().parents[1]
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+# 傾き補正の回転行列は step19 の定義を**唯一の正**として共有する（二重定義で
+# 座標系がずれるのを防ぐ）。原本96kHzから直接切り出す経路でも、通常変換と
+# まったく同じ回転を適用しなければ、その録音だけ方位がずれる。
+_spec = importlib.util.spec_from_file_location(
+    "_s19conv", Path(__file__).with_name("step19_realsmoke_convert.py"))
+_s19 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_s19)
+rot_matrix = _s19.rot_matrix
 
 FS_OUT = 24000
 DUR = 10.0
@@ -171,12 +181,17 @@ def negative_row(new_clip: str, orig: str, off: float, own0: float, own1: float,
 
 # ------------------------------------------------------------------ 音声の切り出し
 def cut_audio(src: Path, start_s: float, dur_s: float, out_path: Path,
-              gain_db: float = 0.0, fs_out: int = FS_OUT) -> Path:
+              gain_db: float = 0.0, fs_out: int = FS_OUT,
+              pitch: float = 0.0, roll: float = 0.0, yaw: float = 0.0) -> Path:
     """原録音の [start_s, start_s+dur_s) を切り出して fs_out で書き出す。
 
     ストリーム読みなので長時間ファイルでもメモリに載る。入力fsが fs_out と
     異なる場合のみ、前後 MARGIN_S のマージンを付けてリサンプルしてから
-    厳密な区間を取り出す（境界の過渡を持ち込まないため）。"""
+    厳密な区間を取り出す（境界の過渡を持ち込まないため）。
+
+    pitch/roll/yaw: **原本(96kHz)から直接切り出す経路で必須**。step19の通常変換で
+    掛かるはずの傾き補正をここで掛けないと、その録音だけ方位座標が他とずれる。
+    step19変換済みファイルを入力にする場合は既に補正済みなので 0 のままにする。"""
     with sf.SoundFile(str(src)) as f:
         fs, n_total, nch = f.samplerate, len(f), f.channels
         assert nch == 4, f"{src.name}: 4ch(AmbiX)ではありません ch={nch}"
@@ -199,6 +214,11 @@ def cut_audio(src: Path, start_s: float, dur_s: float, out_path: Path,
     y = buf[lead:lead + n]
     if len(y) < n:                        # 端数はゼロ詰め（末尾クリップのみ発生しうる）
         y = np.vstack([y, np.zeros((n - len(y), 4))])
+    if pitch or roll or yaw:              # 傾き補正（W不変・ch順 W,Y,Z,X）
+        y = y.copy()
+        R = rot_matrix(pitch, roll, yaw)
+        xyz = y[:, [3, 1, 2]] @ R.T
+        y[:, 3], y[:, 1], y[:, 2] = xyz[:, 0], xyz[:, 1], xyz[:, 2]
     if gain_db:
         y = y * (10.0 ** (gain_db / 20.0))
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +235,16 @@ def _load_ann(path: Path):
     return rows, by_orig
 
 
-def _write_ann(path: Path, rows):
+def _write_ann(path: Path, rows, append: bool = False):
+    """--append 時は既存CSVの行を先に読み込み、列を和集合にして書き直す。
+
+    負例の原録音が複数ファイルに分かれる（静穏30分・繁華街30分…）ため、
+    同じ注釈CSVへ追記できないと採点前の統合作業が手作業になる。"""
+    if append and path.exists():
+        prev = list(csv.DictReader(open(path, encoding="utf-8-sig")))
+        seen = {(r["clip_id"], r.get("event_id", "")) for r in rows}
+        rows = [r for r in prev
+                if (r["clip_id"], r.get("event_id", "")) not in seen] + list(rows)
     cols = list(BASE_COLS)
     for r in rows:
         for k in r:
@@ -242,7 +271,16 @@ def main() -> int:
     cpa_at = float(_arg("--cpa-at", str(CPA_AT)))
     overlap = float(_arg("--overlap", str(OVERLAP)))
     gain_db = float(_arg("--gain-db", "0"))
+    pitch = float(_arg("--pitch", "0"))
+    roll = float(_arg("--roll", "0"))
+    yaw = float(_arg("--yaw", "0"))
+    append = "--append" in sys.argv
     assert mode in ("event", "negative"), f"--mode は event|negative: {mode}"
+    rot = dict(pitch=pitch, roll=roll, yaw=yaw)
+    print(f"# mode={mode} gain={gain_db:+.2f}dB "
+          f"回転(pitch/roll/yaw)={pitch:g}/{roll:g}/{yaw:g}"
+          + ("  ※原本から切る場合は step19 と同じ回転角を必ず渡すこと"
+             if gain_db and not (pitch or roll or yaw) else ""))
 
     files = sorted(list(src.glob("*.flac")) + list(src.glob("*.wav"))) \
         if src.is_dir() else [src]
@@ -264,7 +302,8 @@ def main() -> int:
                 ev = str(r.get("event_id", "1"))
                 off = plan_event_cut(float(r["t_cpa"]), length, dur, cpa_at)
                 new_clip = f"{orig}_e{ev}"
-                cut_audio(path, off, dur, out_dir / f"{new_clip}.flac", gain_db)
+                cut_audio(path, off, dur, out_dir / f"{new_clip}.flac", gain_db,
+                          **rot)
                 out_rows += rebase_rows(rows, off, dur, orig, new_clip,
                                         target_event=ev)
                 n_clip += 1
@@ -276,7 +315,8 @@ def main() -> int:
             tmpl = next((r for r in rows if r["class"].strip() == "none"), None)
             for i, (off, own0, own1) in enumerate(plan):
                 new_clip = f"{orig}_s{i:03d}"
-                cut_audio(path, off, dur, out_dir / f"{new_clip}.flac", gain_db)
+                cut_audio(path, off, dur, out_dir / f"{new_clip}.flac", gain_db,
+                          **rot)
                 out_rows.append(negative_row(new_clip, orig, off, own0, own1, tmpl))
                 out_rows += rebase_rows(rows, off, dur, orig, new_clip,
                                         own=(own0, own1))
@@ -285,9 +325,9 @@ def main() -> int:
             print(f"  {orig}: {len(plan)}クリップ 担当合計={cov:.2f}s "
                   f"(録音長={length:.2f}s, 差={cov-length:+.3f}s)")
 
-    _write_ann(ann_out, out_rows)
+    _write_ann(ann_out, out_rows, append=append)
     print(f"\n{mode}: {n_clip}クリップ / 注釈{len(out_rows)}行 -> {out_dir}")
-    print(f"注釈CSV -> {ann_out}")
+    print(f"注釈CSV -> {ann_out}" + ("（既存行へ追記）" if append else ""))
     return 0
 
 

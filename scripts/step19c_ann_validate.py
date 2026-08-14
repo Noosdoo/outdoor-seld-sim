@@ -11,15 +11,18 @@
   S4 t_start ≤ t_cpa、いずれも [0, --dur] の範囲内
   S5 距離クラス(car_drive/kick/bike)の採点対象行に有限・非負の 横距離m がある
   S6 cut_offset_s が非負の数、orig_file が非空（--cut時）
-  S7 **負例の担当区間が原録音上で隙間なく・重なりなくタイルすること**
+  S6 cut_offset_s が非負の数、orig_file が非空、scored が 0/1（**負例行も含め全行**）
+  S7 **負例の担当区間が原録音上で先頭0sから末尾まで隙間なく・重なりなくタイルすること**
      （step19b --mode negative の重複分割が正しく効いているかの一発検査。
        ここが崩れていると誤警告の二重計上/取りこぼしが起きる）
-  S8 事前登録との突き合わせ（区分A〜E・状態の本数を集計して表示。不足は警告のみ）
+  S8 事前登録との突き合わせ（区分A〜E・歩行の本数、歩行対比の静止/歩行が同数か）
 
 使い方:
-  python scripts/step19c_ann_validate.py --ann out/realsmoke/ann_clips.csv --cut
+  python scripts/step19c_ann_validate.py --ann out/realsmoke/ann_all.csv --cut
   python scripts/step19c_ann_validate.py --ann ann_orig.csv          # 原録音注釈
-  （--plan で区分ごとの計画本数を上書き。既定は 2026-08-14 確定案の A〜E 各20本）
+  python scripts/step19c_ann_validate.py --ann ann_all.csv --cut --strict  # 収録完了後
+  （--plan で区分ごとの計画本数を上書き。既定は 2026-08-14 確定案の A〜E各20＋歩行20。
+    --strict は本数不足などの警告も不合格にする＝全収録完了後の最終ゲート用）
 """
 from __future__ import annotations
 
@@ -39,7 +42,7 @@ CLASSES = {"siren", "horn", "backup_beep", "bike_bell", "car_drive", "crossing",
 DIST_CLASSES = {"car_drive", "kick", "bike"}
 QUADS = {"F", "B", "L", "R"}
 LATERAL_KEYS = ("横距離m", "横距離", "lateral_m")
-PLAN_DEFAULT = {"A": 20, "B": 20, "C": 20, "D": 20, "E": 20}
+PLAN_DEFAULT = {"A": 20, "B": 20, "C": 20, "D": 20, "E": 20, "歩行": 20}
 EPS = 1e-6
 
 errs, warns = [], []
@@ -109,7 +112,22 @@ def validate(rows, cut: bool, dur: float, plan: dict):
             err(f"S4 {tag}: t_start({t0}) > t_cpa({t1})")
         if t0 < -EPS or t1 > dur + EPS:
             err(f"S4 {tag}: 時刻がクリップ長 [0,{dur}] の外です ({t0},{t1})")
+        if cut:
+            # 負例行も含めて全行を検査する（class=noneで抜けると、担当区間の
+            # 根拠になる cut_offset_s が壊れていても素通りしてしまう）
+            if not r.get("orig_file", "").strip():
+                err(f"S6 {tag}: orig_file が空です")
+            if fnum(r.get("cut_offset_s")) is None or fnum(r["cut_offset_s"]) < -EPS:
+                err(f"S6 {tag}: cut_offset_s が非負の数値ではありません "
+                    f"（現在 '{r.get('cut_offset_s','')}'）")
+            sv = str(r.get("scored", "")).strip().lower()
+            if sv not in ("", "0", "1", "true", "false", "yes", "no"):
+                err(f"S6 {tag}: scored の値が不正です（'{r.get('scored')}'）。"
+                    "0/1 以外は採点側が採点対象と誤認します")
         if cls == "none":
+            if not is_scored(r):
+                err(f"S6 {tag}: 負例行に scored=0 は使えません"
+                    "（露出時間と誤警告の担当区間が消えます）")
             continue
         if is_scored(r):
             if r.get("quadrant", "").strip() not in QUADS:
@@ -118,11 +136,6 @@ def validate(rows, cut: bool, dur: float, plan: dict):
             if cls in DIST_CLASSES and lateral_of(r) is None:
                 err(f"S5 {tag}: 距離クラス {cls} に有効な 横距離m がありません"
                     "（欠けると採点の分母から落ちます）")
-        if cut:
-            if not r.get("orig_file", "").strip():
-                err(f"S6 {tag}: orig_file が空です")
-            if fnum(r.get("cut_offset_s")) is None or fnum(r["cut_offset_s"]) < -EPS:
-                err(f"S6 {tag}: cut_offset_s が非負の数値ではありません")
 
     # ---- S7 負例担当区間のタイル検査（--cut時のみ・原録音単位） ----
     if cut:
@@ -139,6 +152,15 @@ def validate(rows, cut: bool, dur: float, plan: dict):
         for orig, ss in sorted(segs.items()):
             ss.sort()
             total = sum(b - a for a, b, _ in ss)
+            if abs(ss[0][0]) > EPS:
+                err(f"S7 {orig}: 担当が原録音の先頭0.000sから始まっていません"
+                    f"（{ss[0][0]:.3f}sから）→ 冒頭の誤警告を取りこぼします")
+            last_local = fnum(next(r["t_cpa"] for r in rows
+                                   if r["clip_id"].strip() == ss[-1][2]))
+            if last_local is not None and abs(last_local - dur) > EPS:
+                err(f"S7 {orig}: 末尾クリップ {ss[-1][2]} の担当が"
+                    f"クリップ終端({dur}s)まで届いていません（{last_local:.3f}s）"
+                    "→ 録音末尾の誤警告を取りこぼします")
             for (a1, b1, c1), (a2, b2, c2) in zip(ss, ss[1:]):
                 if a2 < b1 - EPS:
                     err(f"S7 {orig}: 担当区間が重複 {c1}[{a1:.3f},{b1:.3f}) と "
@@ -149,17 +171,30 @@ def validate(rows, cut: bool, dur: float, plan: dict):
             print(f"  S7 {orig}: {len(ss)}クリップ 担当合計 {total:.2f}s "
                   f"（{ss[0][0]:.2f}〜{ss[-1][1]:.2f}s 連続）")
 
-    # ---- S8 事前登録との突き合わせ（集計・警告のみ） ----
+    # ---- S8 事前登録との突き合わせ ----
     clips = {}
     for r in rows:
         clips.setdefault(r["clip_id"].strip(), r)
     if any("区分" in r for r in rows):
-        got = Counter(r.get("区分", "").strip()[:1] for r in clips.values())
+        def kind(r):
+            v = r.get("区分", "").strip()
+            return v if v in plan else v[:1]
+        got = Counter(kind(r) for r in clips.values())
         for k in sorted(plan):
             if got.get(k, 0) != plan[k]:
                 warn(f"S8 区分{k}: {got.get(k,0)}本（計画 {plan[k]}本）")
         print("  S8 区分別クリップ数: "
-              + " ".join(f"{k}={got.get(k,0)}" for k in sorted(plan)))
+              + " ".join(f"{k}={got.get(k,0)}" for k in sorted(plan))
+              + f"  計{sum(got.get(k,0) for k in plan)}本（計画 {sum(plan.values())}本）")
+        # 歩行対比は静止版・歩行版が対で揃っていなければ比較が成立しない
+        walk = [r for r in clips.values() if kind(r) == "歩行"]
+        if walk:
+            st = Counter(r.get("状態", "").strip() for r in walk)
+            if st.get("静止", 0) != st.get("歩行", 0):
+                err(f"S8 歩行対比が対になっていません（静止{st.get('静止',0)}・"
+                    f"歩行{st.get('歩行',0)}）。対応比較には同数が必要です")
+            if len(walk) != plan.get("歩行", 20):
+                warn(f"S8 歩行対比: {len(walk)}本（計画 {plan.get('歩行',20)}本）")
     if any("状態" in r for r in rows):
         st = Counter(r.get("状態", "").strip() for r in clips.values() if r.get("状態"))
         print("  S8 状態別クリップ数: " + " ".join(f"{k}={v}" for k, v in sorted(st.items())))
@@ -204,13 +239,15 @@ def main() -> int:
         print("行がありません")
         return 1
     validate(rows, cut, dur, plan)
+    strict = "--strict" in sys.argv
     print()
     for w in warns:
-        print(f"[WARN] {w}")
+        print(f"[{'ERROR(strict)' if strict else 'WARN'}] {w}")
     for e in errs:
         print(f"[ERROR] {e}")
-    if errs:
-        print(f"\nNG: エラー{len(errs)}件・警告{len(warns)}件")
+    if errs or (strict and warns):
+        print(f"\nNG: エラー{len(errs)}件・警告{len(warns)}件"
+              + ("（--strict: 警告も不合格）" if strict else ""))
         return 1
     print(f"\nOK: エラーなし（警告{len(warns)}件）")
     return 0

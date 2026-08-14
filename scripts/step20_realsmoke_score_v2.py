@@ -30,6 +30,13 @@ GT区分（注釈の横距離mから）: critical ≤1.5 / caution ≤3.2 / safe
   ちょうどの発火も半開区間により**ちょうど1回**だけ数えられる。
 誤警告率は両側95%CIに加え片側95%上限（事前登録<1.8回/hの判定用）。
 統計: McNemar厳密・クリップ単位paired bootstrap・Poisson厳密区間。
+連続量: **検出フレーム率**（イベント窓内でそのクラスが出ているフレームの割合）を
+イベントごとに出す＝静止/歩行比較の主指標（計画R7）。
+
+**未実装（意図的・2026-08-15時点）**: ①幾何近似GTによる連続方位・距離誤差
+（動画同期と等速補間の工程が未設計。計画R5の②）②静止/歩行対のWilcoxon検定
+（対応キーの設計が未定。当面は検出フレーム率の対をCSVで出して手元で検定する）。
+卒論・発表でこの2つを「出せる」と書かないこと。
 
 入力列: clip_id,event_id,trial,class,quadrant,t_start,t_cpa[,横距離m,scored,...]
 予測CSV: 6/7列 [stem,frame,class(,track),az,el,dist]（5列旧形式は警告クラスのみ）
@@ -172,6 +179,20 @@ def build_episodes(dseq, nframes, link_deg):
     return eps
 
 
+def frame_recall(pred_clip, cls_idx, t0, t1):
+    """イベント窓[t0,t1]のうち、そのクラスが出ているフレームの割合。
+
+    静止/歩行比較の主指標（連続量）。2値の通知成否よりn=10対でも検出力が出る。
+    窓が空/予測なしは None（未算出）。"""
+    k0, k1 = int(np.floor(t0 * FPS)), int(np.ceil(t1 * FPS))
+    k0 = max(k0, 0)
+    if k1 <= k0:
+        return None
+    hit = sum(1 for k in range(k0, k1)
+              if any(c == cls_idx for c, _, _ in pred_clip.get(k, [])))
+    return round(hit / (k1 - k0), 3)
+
+
 def warn_fires(frames_of_cls, az_of, nframes):
     """警告音クラス: v1定数。発火時刻は因果時刻(k+1)/FPS。"""
     fires, last = [], []
@@ -291,7 +312,10 @@ def evaluate(rows, pred, link_deg, has_dist):
             for r in sorted(evrows, key=lambda x: float(x["t_cpa"])):
                 lat = lateral_of(r)
                 base = {"clip": clip, "trial": r["trial"],
-                        "event_id": r.get("event_id", "1"), "class": cls}
+                        "event_id": r.get("event_id", "1"), "class": cls,
+                        "frame_recall": frame_recall(
+                            pred.get(clip, {}), ci,
+                            float(r["t_start"]), float(r["t_cpa"]))}
                 if lat is None:
                     extras["n_unscored"] += 1
                     events.append({**base, "gt_tier": "-", "notified": None,
@@ -344,7 +368,9 @@ def evaluate(rows, pred, link_deg, has_dist):
                 t1 = float(r["t_cpa"]) + WIN_POST
                 base = {"clip": clip, "trial": r["trial"],
                         "event_id": r.get("event_id", "1"), "class": cls,
-                        "gt_tier": "warn"}
+                        "gt_tier": "warn",
+                        "frame_recall": frame_recall(
+                            pred.get(clip, {}), ci, t0 + WIN_PRE, t1 - WIN_POST)}
                 pick = None
                 for i, (t, az) in enumerate(cand):
                     if not used[i] and t0 <= t <= t1:
@@ -432,9 +458,14 @@ def main() -> int:
     if extras["n_maskonly"]:
         rep.append(f"- scored=0（最接近がクリップ外・マスク専用）: "
                    f"{extras['n_maskonly']}件")
+    frs = [e["frame_recall"] for e in scored
+           if e.get("frame_recall") is not None]
     rep += [(f"- リード中央値 {np.median(leads):.1f}s（範囲 {min(leads):.1f}〜"
              f"{max(leads):.1f}s、注釈±1s精度）" if leads else "- リード: n/a"),
-            (f"- 方向4象限一致 {sum(quads)}/{len(quads)}" if quads else "- 象限: n/a")]
+            (f"- 方向4象限一致 {sum(quads)}/{len(quads)}" if quads else "- 象限: n/a"),
+            (f"- 検出フレーム率 中央値 {np.median(frs):.3f}"
+             f"（イベント窓内でそのクラスが出ているフレームの割合・n={len(frs)}）"
+             if frs else "- 検出フレーム率: n/a")]
     if hours > 0:
         lo, hi = poisson_rate_ci(neg["n_false"], hours)
         up1 = poisson_upper95_one_sided(neg["n_false"], hours)
@@ -469,14 +500,16 @@ def main() -> int:
                        f"bootstrap95%CI {bs[1]:+.2f}〜{bs[2]:+.2f}s, "
                        f"クリップ{len(diffs)}件/対{n_pair}件）")
 
-    rep += ["", "| clip | trial | event | クラス | GT区分 | 成功 | 発火tier | リード[s] | 象限 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    rep += ["", "| clip | trial | event | クラス | GT区分 | 成功 | 発火tier | リード[s] | 象限 | 検出F率 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for e in events:
         mark = ("—" if e["notified"] is None else ("○" if e["notified"] else "×"))
+        fr = e.get("frame_recall")
         rep.append(f"| {e['clip']} | {e['trial']} | {e['event_id']} | {e['class']} | "
                    f"{e['gt_tier']} | {mark} | {e['fired_tier'] or '—'} | "
                    f"{e['lead'] if e['lead'] is not None else '—'} | "
-                   f"{'○' if e['quad_ok'] else ('×' if e['quad_ok'] is not None else '—')} |")
+                   f"{'○' if e['quad_ok'] else ('×' if e['quad_ok'] is not None else '—')} | "
+                   f"{fr if fr is not None else '—'} |")
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text("\n".join(rep) + "\n", encoding="utf-8")
     print("\n".join(rep[:12]))

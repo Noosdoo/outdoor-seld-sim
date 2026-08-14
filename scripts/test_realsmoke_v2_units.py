@@ -52,6 +52,7 @@ def _load(name, rel):
 v2 = _load("s20v2", "step20_realsmoke_score_v2.py")
 s19 = _load("s19rc", "step19_realsmoke_convert.py")
 cut = _load("s19bcut", "step19b_realsmoke_cut.py")
+val = _load("s19cval", "step19c_ann_validate.py")
 
 fails = []
 n_checks = 0
@@ -412,6 +413,98 @@ with tempfile.TemporaryDirectory() as td:
     g_full = 55.0 - s19.spl_a(w24[int(0.5 * 24000):int(2.5 * 24000)], 24000)
     check("T24 --gain-only の較正ゲインが全長変換と一致（±0.1dB）",
           abs(g_stream - g_full) < 0.1, f"(stream={g_stream:+.3f}, full={g_full:+.3f})")
+
+# ============ 2026-08-15 監査指摘の回帰（T25〜T29） ============
+
+# ---------------- T25: 原本から切る経路でもFOA回転が掛かる ----------------
+with tempfile.TemporaryDirectory() as td:
+    import soundfile as sf
+    td = Path(td)
+    fs = 96000
+    n = int(12 * fs)
+    src = np.zeros((n, 4), dtype=np.float32)
+    src[:, 0] = 0.1          # W
+    src[:, 3] = 0.1          # X（正面）→ yaw+90°でY（左）へ移るはず
+    p = td / "raw.wav"
+    sf.write(p, src, fs, subtype="FLOAT")
+    o_rot = cut.cut_audio(p, 1.0, 10.0, td / "rot.flac", yaw=90.0)
+    o_non = cut.cut_audio(p, 1.0, 10.0, td / "non.flac")
+    yr, _ = sf.read(o_rot)
+    yn, _ = sf.read(o_non)
+    mid = len(yr) // 2
+    # 回転あり: X→ほぼ0・Y→+0.1 / 回転なし: X=0.1・Y=0
+    check("T25 【回帰】原本切り出しにも step19 と同じFOA回転が掛かる",
+          abs(yr[mid, 3]) < 5e-3 and abs(yr[mid, 1] - 0.1) < 5e-3
+          and abs(yn[mid, 3] - 0.1) < 5e-3 and abs(yn[mid, 1]) < 5e-3,
+          f"(rot X={yr[mid,3]:.4f} Y={yr[mid,1]:.4f} / "
+          f"non X={yn[mid,3]:.4f} Y={yn[mid,1]:.4f})")
+
+# ---------------- T26: 検証器が壊れた負例行を落とす ----------------
+def _val(rows, cut_mode=True, dur=10.0):
+    val.errs.clear()
+    val.warns.clear()
+    val.validate(rows, cut_mode, dur, dict(val.PLAN_DEFAULT))
+    return list(val.errs)
+
+ok_neg = [{"clip_id": "n_s000", "event_id": "n1", "trial": "neg", "class": "none",
+           "quadrant": "", "t_start": "0", "t_cpa": "10", "orig_file": "n",
+           "cut_offset_s": "0", "scored": "1"}]
+bad_neg = [dict(ok_neg[0], orig_file="", cut_offset_s="", scored="garbage")]
+gap_neg = [dict(ok_neg[0]),
+           {"clip_id": "n_s001", "event_id": "n1", "trial": "neg", "class": "none",
+            "quadrant": "", "t_start": "2", "t_cpa": "10", "orig_file": "n",
+            "cut_offset_s": "9", "scored": "1"}]
+head_neg = [dict(ok_neg[0], t_start="1", cut_offset_s="0")]
+e_ok, e_bad, e_gap, e_head = (_val(ok_neg), _val(bad_neg), _val(gap_neg),
+                              _val(head_neg))
+check("T26 【回帰】負例行の orig_file/cut_offset_s/scored 不正を検出",
+      not e_ok and len(e_bad) >= 3, f"(ok={len(e_ok)}, bad={len(e_bad)})")
+check("T26b 【回帰】担当区間の隙間・先頭0s未達を検出",
+      any("隙間" in m for m in e_gap) and any("先頭" in m for m in e_head),
+      f"(gap={len(e_gap)}, head={len(e_head)})")
+
+# ---------------- T27: 歩行対比の対不整合を検出 ----------------
+def _walk(n_stat, n_walk):
+    rows = []
+    for i in range(n_stat + n_walk):
+        rows.append({"clip_id": f"w{i}", "event_id": "1", "trial": "w",
+                     "class": "car_drive", "quadrant": "L", "t_start": "1",
+                     "t_cpa": "8", "横距離m": "3.0", "区分": "歩行",
+                     "状態": "静止" if i < n_stat else "歩行",
+                     "orig_file": "w", "cut_offset_s": "0", "scored": "1"})
+    return _val(rows)
+
+check("T27 歩行対比が静止/歩行の対で揃わなければエラー",
+      not any("対になって" in m for m in _walk(10, 10))
+      and any("対になって" in m for m in _walk(12, 8)),
+      f"(10-10={len(_walk(10,10))}, 12-8={len(_walk(12,8))})")
+
+# ---------------- T28: 検出フレーム率 ----------------
+pred28 = {"c9": {k: [(4, 0.0, 2.0)] for k in range(10, 40)}}   # 1.0〜4.0sだけ検出
+rows28 = [{"clip_id": "c9", "event_id": "1", "trial": "t1", "class": "car_drive",
+           "quadrant": "F", "t_start": "0", "t_cpa": "8", "横距離m": "2.5"}]
+ev28, _, _ = v2.evaluate(rows28, pred28, link_deg=60.0, has_dist=True)
+check("T28 検出フレーム率＝窓内でクラスが出ているフレームの割合（30/80）",
+      abs(ev28[0]["frame_recall"] - 0.375) < 1e-9,
+      f"(fr={ev28[0]['frame_recall']})")
+
+# ---------------- T29: --append で複数の負例ファイルを1本のCSVへ ----------------
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    csv_path = td / "ann_all.csv"
+    cut._write_ann(csv_path, [cut.negative_row("a_s000", "a", 0.0, 0.0, 10.0)])
+    cut._write_ann(csv_path, [cut.negative_row("b_s000", "b", 0.0, 0.0, 10.0)],
+                   append=True)
+    import csv as _csv
+    got29 = list(_csv.DictReader(open(csv_path, encoding="utf-8-sig")))
+    cut._write_ann(csv_path, [cut.negative_row("b_s000", "b", 0.0, 0.0, 9.0)],
+                   append=True)
+    got29b = list(_csv.DictReader(open(csv_path, encoding="utf-8-sig")))
+    check("T29 --append で追記・同一clipは新しい行で置換",
+          len(got29) == 2 and len(got29b) == 2
+          and [r["clip_id"] for r in got29b].count("b_s000") == 1
+          and next(r for r in got29b if r["clip_id"] == "b_s000")["t_cpa"] == "9.000",
+          f"(n={len(got29)}→{len(got29b)})")
 
 print()
 if fails:
