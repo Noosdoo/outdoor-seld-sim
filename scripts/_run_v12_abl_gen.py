@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import time
@@ -37,12 +38,25 @@ if not ARM:
         "ABLATE が空です。本ドライバは ablation arm 専用です。\n"
         "基準(full)の生成は scripts/_run_v12_gen.py を使ってください。")
 
+# 【fail-fast①】物理スイッチのモジュールを明示import して、実際に有効かを検証する。
+# サーバのコードが古く ablate.py が無いと、ImportError でここで落ちる。
+# 2026-08-16の確認runでは、サーバに ablate.py が無いまま**エラーも出さず**フル物理で
+# 10,200本を生成し、基準と同一のデータで学習・採点まで通ってしまった（差が出ないのは当然）。
+# 同じ事故を二度と黙って通さないための検査。
+from outdoor_seld import ablate as _abl  # noqa: E402
+if _abl.MODE != ARM:
+    raise SystemExit(
+        f"物理スイッチが有効になっていません（ablate.MODE={_abl.MODE!r} / 要求={ARM!r}）。"
+        "サーバのコードが古い可能性があります。src/outdoor_seld/ を同期してください。")
+print(f"[fail-fast] 物理スイッチ確認: ablate.MODE={_abl.MODE}", flush=True)
+
 import step11_v12_render as v12  # noqa: E402  (importでABLATEが読まれる)
 m9 = v12.m9
 
 BASE_DS = ROOT / "out" / "dataset_outdoor_siren_v12"
 DS = ROOT / "out" / f"dataset_outdoor_siren_v12_abl_{ARM}"
 assert DS.resolve() != BASE_DS.resolve(), "出力先が基準データセットと同一です"
+FAILFAST_N = 5           # 基準と突き合わせる先頭クリップ数
 
 # レンダとラベルが見る出力先をarm専用ディレクトリへ差し替える
 m9.DS = DS
@@ -65,12 +79,30 @@ def main() -> None:
     print(f"arm={ARM} rows={lo}-{hi} out={DS}", flush=True)
     t0 = time.time()
     done = skip = 0
+    checked = []          # fail-fast② 用: 生成直後に基準と突き合わせた結果
     for i, row in enumerate(part):
         if (m9.DS / "foa" / f"{row['clip_id']}.flac").exists():
             skip += 1
             continue
         v12.generate_clip_v12(row)
         done += 1
+        # 【fail-fast②】最初の数本を基準の同じクリップとバイト比較する。
+        # 全部同一なら物理スイッチが実質無効＝測定にならないので、ここで落とす。
+        if len(checked) < FAILFAST_N:
+            base_f = BASE_DS / "foa" / f"{row['clip_id']}.flac"
+            arm_f = m9.DS / "foa" / f"{row['clip_id']}.flac"
+            if base_f.exists():
+                same = (hashlib.sha256(base_f.read_bytes()).digest()
+                        == hashlib.sha256(arm_f.read_bytes()).digest())
+                checked.append(same)
+                if len(checked) == FAILFAST_N and all(checked):
+                    raise SystemExit(
+                        f"[fail-fast] arm={ARM} の生成音が基準と{FAILFAST_N}本連続で"
+                        "バイト同一です。物理スイッチが効いていません（測定になりません）。"
+                        "サーバの src/outdoor_seld/ を同期してから再実行してください。")
+                if len(checked) == FAILFAST_N:
+                    print(f"[fail-fast] 基準との差分を確認（同一{sum(checked)}/"
+                          f"{FAILFAST_N}本）: スイッチ有効", flush=True)
         if done % 50 == 0:
             el = time.time() - t0
             print(f"[{lo}-{hi}] {i+1}/{len(part)} done={done} skip={skip} "

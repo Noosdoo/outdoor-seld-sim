@@ -69,6 +69,7 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
                 gain_db: float = 0.0, block_len: int = 240,
                 enable_doppler: bool = True,
                 enable_spreading: bool = True,
+                spreading_ref_m: float | None = None,
                 enable_air_absorption: bool = True) -> np.ndarray:
     """1音源×静止無指向1chマイクの物理適用済みモノラルを返す。
 
@@ -147,7 +148,13 @@ def render_mono(dry: np.ndarray, waypoints, mic_pos, fs: int,
     if enable_spreading:
         g = np.ones(n)
         ok = valid & np.isfinite(dist) & (dist > 0)
-        g[ok] = 1.0 / dist[ok]
+        # spreading_ref_m が指定されたときは、実距離ではなく**基準距離**で減衰させる
+        # （= 全音源を r_ref に置いたとみなす）。ablation の no_1r 条件で使う。
+        # 素朴に g=1（減衰なし）にすると全音源が1m相当となり、遠方源が桁違いに大きくなって
+        # 混合波形がフルスケールを超える（2026-08-16の確認runで peak 1.11 のクリップで停止）。
+        # 距離手がかり（遠近の音量差・接近に伴う増大）は同じく消えるが、波形は壊れない。
+        g[ok] = (1.0 / dist[ok] if spreading_ref_m is None
+                 else 1.0 / float(spreading_ref_m))
         s = s * g
 
     # ④ 大気吸収（DSと同一の周波数グリッド・係数・FIR設計、ブロック毎に更新）
