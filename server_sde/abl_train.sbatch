@@ -9,11 +9,22 @@
 # 初期重み・W_DIST=3.0・DIST_MODE=log・epoch数は基準と完全同一に保つ
 # （「タスクは同じで世界の物理だけ変える」= ablationの原則。ここを揃えないと比較が壊れる）。
 #
-# 使い方: sbatch --export=ALL,ABLATE=no_1r server_sde/abl_train.sbatch
+# 使い方:
+#   確認run（既定・基準ルートに一切触れない）:
+#     sbatch --export=ALL,ABLATE=no_1r server_sde/abl_train.sbatch
+#   本番（フル物理valの転移評価まで行う。基準ルートを**読む**）:
+#     sbatch --export=ALL,ABLATE=no_1r,ABL_FULLVAL=1 server_sde/abl_train.sbatch
+#
+# ABL_FULLVAL=0（既定）では自条件valのみを推論し、基準の datasets_v12 には
+# 読み書きとも一切アクセスしない。確認runで基準に触れる理由がないため既定を0にした。
 #
 # 前提: server_sde/_train_sde12.py と _infer_sde12.py がサーバ側 PSELDNets に同期済みであること
 # （sbatchは ~/research/PSELDNet/PSELDNets へ cd してそこの _train_sde12.py を呼ぶ）。
 set -ex
+
+# 基準の無変更を機械で保証する（冒頭で指紋を取り、末尾で照合して違えば失敗させる）
+source ~/research/outdoor_seld_e2e/server_sde/_baseline_guard.sh
+guard_record
 
 : "${ABLATE:?ABLATE を指定してください}"
 case "$ABLATE" in
@@ -52,14 +63,21 @@ echo "using ckpt: $ck"
   paths.dataset_dir=$ROOTDIR
 
 # フル物理val（基準の世界で採点＝転移ギャップ。**主要評価はこちら**）
-.venv/bin/python _infer_sde12.py experiment=outdoor_siren_v12_valinfer mode=test \
-  ckpt_path=$ck \
-  model.kwargs.pretrained_path=null \
-  experiment_name=infer_${EXP}_fullval \
-  paths.log_dir=$HOME/PSELDNets_logs \
-  paths.dataset_dir=$PS/datasets_v12
+# 確認runでは既定でスキップする。ここだけが基準ルートに触れる工程のため。
+TAGS="selfval"
+if [ "${ABL_FULLVAL:-0}" = "1" ]; then
+  .venv/bin/python _infer_sde12.py experiment=outdoor_siren_v12_valinfer mode=test \
+    ckpt_path=$ck \
+    model.kwargs.pretrained_path=null \
+    experiment_name=infer_${EXP}_fullval \
+    paths.log_dir=$HOME/PSELDNets_logs \
+    paths.dataset_dir=$PS/datasets_v12
+  TAGS="selfval fullval"
+else
+  echo "[abl] ABL_FULLVAL=0 のためフル物理val推論はスキップ（基準ルートに触れない）"
+fi
 
-for tag in selfval fullval; do
+for tag in $TAGS; do
   python3 - $HOME/PSELDNets_logs/outdoor_siren_v12/runs/infer_${EXP}_${tag}/submissions <<'EOF'
 import sys, glob, os
 sub = sys.argv[1]
@@ -74,4 +92,6 @@ with open(out, "w") as w:
 print("wrote", out, sum(1 for _ in open(out)))
 EOF
 done
+
+guard_verify || exit 1
 echo ABL_TRAIN_DONE_$ABLATE

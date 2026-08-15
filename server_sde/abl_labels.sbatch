@@ -15,6 +15,10 @@
 # 基準の datasets_v12/ には触らない（前処理h5が基準ルートへ書かれる事故を防ぐ）。
 set -eux
 
+# 基準の無変更を機械で保証する（前処理h5が基準ルートへ書かれる事故を確実に検知）
+source ~/research/outdoor_seld_e2e/server_sde/_baseline_guard.sh
+guard_record
+
 : "${ABLATE:?ABLATE を指定してください}"
 case "$ABLATE" in
   no_1r|no_doppler|no_ground|no_airabs) ;;
@@ -49,4 +53,5 @@ $PY _preproc_emptyok12.py dataset=outdoor_siren_v12 dataset_type=dev \
 $PY _preproc_sde.py mode=extract_data dataset=outdoor_siren_v12 \
     dataset_type=dev paths.dataset_dir=$ROOTDIR
 
+guard_verify || exit 1
 echo ABL_LABELS_DONE_$ABLATE
