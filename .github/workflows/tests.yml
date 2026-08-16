@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# tests/test_fastsim.py is not run here: it compares the fast renderer against a
+# previously generated clip under out/, which is deliberately not committed.
+# Run it locally after scripts/step1_generate_clip.py.
+
+jobs:
+  unit:
+    name: unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy soundfile dynamic-sound
+
+      - name: Geometry — emission time, Doppler, az/el (12 checks)
+        run: python tests/test_geometry.py
+
+      - name: FOA — ACN/SN3D gains, intensity-vector DOA (13 checks)
+        run: python tests/test_foa.py
+
+      - name: Noise — pink/brown spectra, diffuse FOA noise (8 checks)
+        run: python tests/test_noise.py

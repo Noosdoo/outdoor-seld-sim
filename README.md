@@ -1,5 +1,8 @@
 # outdoor-seld-sim
 
+[![tests](https://github.com/Noosdoo/outdoor-seld-sim/actions/workflows/tests.yml/badge.svg)](https://github.com/Noosdoo/outdoor-seld-sim/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Physics-based outdoor SELD: simulate → label → train → evaluate → notify.**
 
 An open, end-to-end pipeline that renders outdoor **moving** sound sources with real
@@ -85,6 +88,10 @@ python tests/test_fastsim.py    #  6 checks — fast renderer vs reference simul
 ```
 
 Last full run: **39 checks, 0 failed** (2026-08-16).
+
+The first three run in CI on Linux and Windows. `test_fastsim.py` compares the fast
+renderer against a previously generated clip, so it needs `scripts/step1_generate_clip.py`
+to have been run first and is therefore local-only.
 
 ## Results so far
 
