@@ -20,6 +20,10 @@ GUARD_PATHS=(
   "$HOME/research/PSELDNet/PSELDNets/datasets_v12"
   "$HOME/PSELDNets_logs/outdoor_siren_v12/runs/outdoor_siren_v12_sde_w3"
   "$HOME/PSELDNets_logs/v12_init_from_run3ep84.ckpt"
+  # 基準の前処理キャッシュ。**データセット名でキー付けされる**ため、armの前処理が
+  # 同名で上書きしうる（2026-08-16に実際に上書きされた）。armは paths.hdf5_dir を
+  # 分けること。ここに入れておけば同じ事故を検知できる。
+  "$HOME/research/PSELDNet/PSELDNets/_hdf5"
 )
 GUARD_FILE="${GUARD_FILE:-/tmp/abl_guard_${SLURM_JOB_ID:-manual}.txt}"
 

@@ -30,6 +30,7 @@ E2E=~/research/outdoor_seld_e2e
 PY=$PS/.venv/bin/python
 ARMDS=$E2E/out/dataset_outdoor_siren_v12_abl_${ABLATE}
 ROOTDIR=$PS/datasets_v12_abl_${ABLATE}
+HDF5DIR=$PS/_hdf5_abl_${ABLATE}   # 前処理キャッシュもarmごとに分ける（名前衝突の回避）
 [ "$ROOTDIR" != "$PS/datasets_v12" ] || { echo "基準ルートと同一"; exit 1; }
 [ -d "$ARMDS/foa" ] || { echo "armのfoaが無い: $ARMDS"; exit 1; }
 echo "arm=$ABLATE データ=$ARMDS ルート=$ROOTDIR （基準 $PS/datasets_v12 には触れない）"
@@ -47,11 +48,11 @@ PYTHONPATH=scripts:src ABLATE=$ABLATE $PY scripts/_run_v12_abl_labels.py
 cd $PS
 $PY _preproc_emptyok12.py dataset=outdoor_siren_v12 dataset_type=dev \
     wav_format=.flac mode=extract_data num_workers=8 \
-    paths.dataset_dir=$ROOTDIR
+    paths.dataset_dir=$ROOTDIR paths.hdf5_dir=$HDF5DIR
 
 # ④ adpit_dist（SDE距離ラベル、8クラス）
 $PY _preproc_sde.py mode=extract_data dataset=outdoor_siren_v12 \
-    dataset_type=dev paths.dataset_dir=$ROOTDIR
+    dataset_type=dev paths.dataset_dir=$ROOTDIR paths.hdf5_dir=$HDF5DIR
 
 guard_verify || exit 1
 echo ABL_LABELS_DONE_$ABLATE

@@ -35,6 +35,7 @@ esac
 PS=~/research/PSELDNet/PSELDNets
 ROOTDIR=$PS/datasets_v12_abl_${ABLATE}
 EXP=outdoor_siren_v12_abl_${ABLATE}
+HDF5DIR=$PS/_hdf5_abl_${ABLATE}
 [ -d "$ROOTDIR" ] || { echo "arm用ルートが無い（先に abl_labels.sbatch を回す）: $ROOTDIR"; exit 1; }
 [ "$ROOTDIR" != "$PS/datasets_v12" ] || { echo "基準ルートと同一"; exit 1; }
 
@@ -48,7 +49,7 @@ export SDE_DIST_MODE=log
   experiment=outdoor_siren_v12 \
   experiment_name=$EXP \
   paths.log_dir=$HOME/PSELDNets_logs \
-  paths.dataset_dir=$ROOTDIR \
+  paths.dataset_dir=$ROOTDIR paths.hdf5_dir=$HDF5DIR \
   model.kwargs.pretrained_path=$SDE_INIT_CKPT
 
 ck=$(ls $HOME/PSELDNets_logs/outdoor_siren_v12/runs/$EXP/checkpoints/epoch_*.ckpt | head -1)
@@ -60,7 +61,7 @@ echo "using ckpt: $ck"
   model.kwargs.pretrained_path=null \
   experiment_name=infer_${EXP}_selfval \
   paths.log_dir=$HOME/PSELDNets_logs \
-  paths.dataset_dir=$ROOTDIR
+  paths.dataset_dir=$ROOTDIR paths.hdf5_dir=$HDF5DIR
 
 # フル物理val（基準の世界で採点＝転移ギャップ。**主要評価はこちら**）
 # 確認runでは既定でスキップする。ここだけが基準ルートに触れる工程のため。
@@ -71,7 +72,7 @@ if [ "${ABL_FULLVAL:-0}" = "1" ]; then
     model.kwargs.pretrained_path=null \
     experiment_name=infer_${EXP}_fullval \
     paths.log_dir=$HOME/PSELDNets_logs \
-    paths.dataset_dir=$PS/datasets_v12
+    paths.dataset_dir=$PS/datasets_v12 paths.hdf5_dir=$PS/_hdf5
   TAGS="selfval fullval"
 else
   echo "[abl] ABL_FULLVAL=0 のためフル物理val推論はスキップ（基準ルートに触れない）"

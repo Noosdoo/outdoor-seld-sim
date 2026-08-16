@@ -27,6 +27,7 @@ guard_record
 PS=~/research/PSELDNet/PSELDNets
 ROOTDIR=$PS/datasets_v12_abl_${ABLATE}
 EXP=outdoor_siren_v12_abl_${ABLATE}
+HDF5DIR=$PS/_hdf5_abl_${ABLATE}
 ck=$HOME/PSELDNets_logs/outdoor_siren_v12/runs/$EXP/checkpoints/$CK_NAME
 [ -f "$ck" ] || { echo "ckptが無い: $ck"; exit 1; }
 echo "using ckpt: $ck"
@@ -38,7 +39,7 @@ cd $PS
   model.kwargs.pretrained_path=null \
   experiment_name=infer_${EXP}_selfval \
   paths.log_dir=$HOME/PSELDNets_logs \
-  paths.dataset_dir=$ROOTDIR
+  paths.dataset_dir=$ROOTDIR paths.hdf5_dir=$HDF5DIR
 
 TAGS="selfval"
 if [ "${ABL_FULLVAL:-0}" = "1" ]; then
@@ -47,7 +48,7 @@ if [ "${ABL_FULLVAL:-0}" = "1" ]; then
     model.kwargs.pretrained_path=null \
     experiment_name=infer_${EXP}_fullval \
     paths.log_dir=$HOME/PSELDNets_logs \
-    paths.dataset_dir=$PS/datasets_v12
+    paths.dataset_dir=$PS/datasets_v12 paths.hdf5_dir=$PS/_hdf5
   TAGS="selfval fullval"
 else
   echo "[abl] ABL_FULLVAL=0 のためフル物理val推論はスキップ（基準ルートに触れない）"
