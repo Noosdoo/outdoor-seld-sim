@@ -19,6 +19,16 @@ FULLSCALE_SINE_SPL = 143.0
 # デジタルRMS 1.0 が対応する dB SPL(RMS)（正弦波基準から導出）
 K_RMS_SPL = FULLSCALE_SINE_SPL + 20.0 * np.log10(np.sqrt(2.0))  # ≈ 146.0103
 
+# 合成の余裕（v12 以降・scripts/step11_v12_render.py の V12_HEADROOM_DB はこれを読む）: 全部の音と背景を一律 −6 dB して描く
+# → 0 dBFS の正弦波 ≡ 149 dB SPL 相当（合成の実効の約束）。値の正はここ 1 か所（2026-10-26 Fable 仕様（先行分）§3・決定 ③）。
+# FULLSCALE_SINE_SPL（143）は変えない（変えると v12 の包みと重なって合成が 155 相当になる＝レビュー M1）。
+SYNTH_HEADROOM_DB = 6.0
+FIELD_FULLSCALE_SINE_SPL = FULLSCALE_SINE_SPL + SYNTH_HEADROOM_DB   # = 149.0
+# 実録の変換の約束（scripts/step19_realsmoke_convert.py の convention・Astra R30-08: 既定は旧の 143・149 は明示の引数で）:
+#   名前 → (0 dBFS の正弦波の dB SPL, 較正のゲインから引く dB)
+FIELD_CONVENTIONS = {"v9_143": (FULLSCALE_SINE_SPL, 0.0), "v12_149": (FIELD_FULLSCALE_SINE_SPL, SYNTH_HEADROOM_DB)}
+FIELD_CONVENTION_DEFAULT = "v9_143"
+
 
 def a_weight_amplitude(f: np.ndarray) -> np.ndarray:
     """A特性の振幅ゲイン（線形倍率）。IEC 61672 の解析式、1kHzで1.0に正規化。"""

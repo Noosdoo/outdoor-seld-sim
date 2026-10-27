@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy scipy soundfile dynamic-sound
+          pip install numpy scipy soundfile dynamic-sound pytest
 
       - name: Geometry — emission time, Doppler, az/el (12 checks)
         run: python tests/test_geometry.py
@@ -39,3 +39,6 @@ jobs:
 
       - name: Noise — pink/brown spectra, diffuse FOA noise (8 checks)
         run: python tests/test_noise.py
+
+      - name: Doppler direction — pitch drops after the pass, walking observer (2 tests)
+        run: python -m pytest -q tests/test_doppler_direction.py

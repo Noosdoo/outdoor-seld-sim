@@ -16,7 +16,7 @@ pids=()
 for i in $(seq 0 $((SH - 1))); do
   lo=$((i * STEP)); hi=$(( (i + 1) * STEP - 1 ))
   [ $hi -ge $N ] && hi=$((N - 1))
-  $PY scripts/_run_v12_gen.py --rows $lo-$hi > v12gen_shard_$i.log 2>&1 &
+  $PY scripts_archive/_run_v12_gen.py --rows $lo-$hi > v12gen_shard_$i.log 2>&1 &
   pids+=($!)
 done
 for p in "${pids[@]}"; do wait $p; done

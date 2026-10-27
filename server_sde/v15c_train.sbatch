@@ -1,0 +1,72 @@
+#!/bin/bash
+#SBATCH -J v15ctrain
+#SBATCH -p a100
+#SBATCH --gres=gpu:a100:1
+#SBATCH --qos=low
+#SBATCH -t 04:00:00
+#SBATCH --requeue
+#SBATCH --open-mode=append
+#SBATCH -o v15ctrain-%j.out
+# v15c 基準学習: **w3 と同一レシピ**（init=v12_init_from_run3ep84 / W_DIST=3 / log / batch8 / lr3e-4 /
+# StepLR60 / 100ep）でデータだけ v15c に替える → best ckpt で val 推論を2つ:
+#   (a) v15c fold2（自分の世界・雨20%・新文法）   → infer_v15c_w3_selfval
+#   (b) v12 fold2（基準の世界・旧文法・雨なし）   → infer_v15c_w3_v12val  ← データ変更の効果はこちらで測る
+# requeue 時は last.ckpt から再開。基準には触れない（guard）。
+set -ex
+source ~/research/outdoor_seld_e2e/server_sde/_baseline_guard.sh
+guard_record
+
+PS=~/research/PSELDNet/PSELDNets
+ROOTDIR=$PS/datasets_v15c
+HDF5DIR=$PS/_hdf5_v15c
+EXP=outdoor_siren_v15c_sde_w3
+[ -d "$ROOTDIR" ] || { echo "datasets_v15c が無い（先に v15c_gen.sbatch）"; exit 1; }
+[ "$ROOTDIR" != "$PS/datasets_v12" ] || { echo "基準ルートと同一"; exit 1; }
+cd $PS
+export SDE_INIT_CKPT=$HOME/PSELDNets_logs/v12_init_from_run3ep84.ckpt
+export SDE_W_DIST=3.0
+export SDE_DIST_MODE=log
+
+LAST=$HOME/PSELDNets_logs/outdoor_siren_v12/runs/$EXP/checkpoints/last.ckpt
+RESUME=""
+[ -f "$LAST" ] && RESUME="ckpt_path=$LAST"
+echo "job=$SLURM_JOB_ID node=$(hostname) gpu=$(nvidia-smi -L | head -1) resume=${RESUME:-new}"
+
+.venv/bin/python _train_sde12.py \
+  experiment=outdoor_siren_v12 \
+  experiment_name=$EXP \
+  paths.log_dir=$HOME/PSELDNets_logs \
+  paths.dataset_dir=$ROOTDIR paths.hdf5_dir=$HDF5DIR \
+  model.kwargs.pretrained_path=$SDE_INIT_CKPT \
+  $RESUME
+
+ck=$(ls $HOME/PSELDNets_logs/outdoor_siren_v12/runs/$EXP/checkpoints/epoch_*.ckpt | head -1)
+echo "using ckpt: $ck"
+echo "[paths] selfval: dataset_dir=$ROOTDIR hdf5_dir=$HDF5DIR"
+echo "[paths] v12val : dataset_dir=$PS/datasets_v12 hdf5_dir=$PS/_hdf5 (read-only)"
+
+for pair in "selfval:$ROOTDIR:$HDF5DIR" "v12val:$PS/datasets_v12:$PS/_hdf5"; do
+  IFS=: read tag dsd h5d <<< "$pair"
+  .venv/bin/python _infer_sde12.py experiment=outdoor_siren_v12_valinfer mode=test \
+    ckpt_path=$ck \
+    model.kwargs.pretrained_path=null \
+    experiment_name=infer_v15c_w3_${tag} \
+    paths.log_dir=$HOME/PSELDNets_logs \
+    paths.dataset_dir=$dsd paths.hdf5_dir=$h5d
+  python3 - $HOME/PSELDNets_logs/outdoor_siren_v12/runs/infer_v15c_w3_${tag}/submissions <<'EOF'
+import sys, glob, os
+sub = sys.argv[1]
+out = os.path.join(os.path.dirname(sub), "val_all.csv")
+with open(out, "w") as w:
+    for f in sorted(glob.glob(os.path.join(sub, "*.csv"))):
+        clip = os.path.splitext(os.path.basename(f))[0]
+        for line in open(f):
+            line = line.strip()
+            if line:
+                w.write(clip + "," + line + "\n")
+print("wrote", out, sum(1 for _ in open(out)))
+EOF
+done
+
+guard_verify || exit 1
+echo V15C_TRAIN_DONE

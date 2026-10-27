@@ -1,0 +1,33 @@
+# eval v3（確定評価セットの作り直し・凍結 r11・変更票 #65・2026-10-13）と選択器 2.1 のサーバ配備の一覧（Fable）。配備は本人の許可のあと。
+# 前提: v28 の配備（v28_deploy_list.txt・描画の連なりと実行時のモジュール）が済んでいること。この一覧はその上に足す分。台帳 = eval_v3_expected_sha256.txt（サーバ側で作る・eval_v3_gen.sbatch が照合）。
+# 手順: (1) v28 の plan を書いたあと手元で step10_eval_v3_plan.py（元 = 最終 plan）→ out/dataset_outdoor_siren_v2final_eval_v3/plan/ の 4 本と params EVAL_V3 を commit
+#       (2) この一覧を配備 → sbatch server_sde/eval_v3_gen.sbatch（許可・区画は -p で）→ 封印（SEALED・CONTRACT）→ 誰も開かない
+#       (3) 学習が終わったら: make_val_manifest_v2final.py の名簿で選択器 2.1（--height-table = 学習 plan・--gt = _v27/metadata_dist・--expected = val の本数）→ ckpt を 1 つ → V2FINAL_CKPT=… sbatch server_sde/v2final_conf_v3.sbatch（1 回だけ）
+scripts/step10_eval_v3_plan.py
+scripts/step10_v27_plan.py
+scripts/step10_v28_plan.py
+scripts/_run_v2final_gen.py
+scripts/_v26_regen_check.py
+scripts/make_val_manifest_v2final.py
+scripts/_v2_ckpt_selector.py
+scripts/test_v2_ckpt_selector.py
+scripts/_score_unified.py
+scripts/_perception_eval.py
+scripts/_notify_threshold_sweep.py
+scripts/_gt_as_pred.py
+server_sde/_prediction_integrity.py
+server_sde/_causal_infer_v17.py
+server_sde/height_patch.py
+server_sde/causal_patch.py
+server_sde/hysteresis_patch.py
+server_sde/eval_v3_gen.sbatch
+server_sde/v2final_conf_v3.sbatch
+md/design/v2final_params.json
+out/dataset_outdoor_siren_v2final_eval_v3/plan/assignment_v2final.csv
+out/dataset_outdoor_siren_v2final_eval_v3/plan/assignment_eval_v3.csv
+out/dataset_outdoor_siren_v2final_eval_v3/plan/manifest_eval_v3_strata.csv
+out/dataset_outdoor_siren_v2final_eval_v3/plan/README_eval_v3.md
+out/dataset_outdoor_siren_v2final_eval_v3/plan/manifest_v26_bellbike.csv
+scripts/step11_v25_render.py
+out/dataset_outdoor_siren_v2final/plan/manifest_val_syn_v2final.csv
+out/dataset_outdoor_siren_v2final/plan/manifest_val_syn_v2final.sha256

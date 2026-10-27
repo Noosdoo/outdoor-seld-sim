@@ -21,7 +21,7 @@ import numpy as np
 @dataclasses.dataclass
 class SceneConfig:
     # このクリップの識別名（ファイル名の元になる）
-    clip_name: str = "fold0_room0_mix001"
+    clip_name: str = "train_syn_clip00000"       # 2026-09-22 の規則 <用途>_<出所>_clip<番号>（旧 fold0_room0_mix001）
     clip_len_sec: float = 10.0   # クリップ全体の長さ [秒]
     fs_sim: int = 48000          # シミュレーション実行レート（高いほど正確・重い）
     fs_out: int = 24000          # PSELDNets 入力レート（デシメート後、これに合わせて渡す）

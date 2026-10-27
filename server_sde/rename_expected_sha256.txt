@@ -1,0 +1,4 @@
+9b4a13d513dce5dbe9374b6ac8e47a7952032fb7198296937c69fa80148f5716  scripts/migrate_clip_ids.py
+4f9f8bf5e7ef270206880af0aab5e73493c6d4e6836ebae54fa0e72439afbec7  src/outdoor_seld/clip_ids.py
+e7ed696be22efc2bae0e309e9c87505876b4587a3b6e5ff9da3daf542526eec2  ../PSELDNet/PSELDNets/configs/data/outdoor_siren_v12.yaml
+3cc0794e4b1565507ae410d756c6145284bd1d6e2c9c66292e0d5b09c70f90b3  ../PSELDNet/PSELDNets/src/evaluate.py

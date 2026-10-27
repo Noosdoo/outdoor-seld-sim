@@ -1,0 +1,18 @@
+# 補正表の組（calib_fit＋calib_check・変更票 #72・2026-10-20）のサーバ配備の一覧（Fable）。配備は本人の許可のあと。
+# 前提: v29 の配備（v29_deploy_list.txt）が済んでいること。この一覧はその上に足す分。台帳 = calib_expected_sha256.txt（サーバ側で作る・calib_gen.sbatch が照合）。
+# 手順: (1) 手元で step10_calib_sets_plan.py → out/dataset_outdoor_siren_v2final_calib/plan/ の 4 本と calib_sets_v29.json を commit
+#       (2) この一覧を配備 → sbatch server_sde/calib_gen.sbatch（許可・a100_3g・保守明け）→ CONTRACT_calib.json
+#       (3) 選択器で ckpt を 1 つ → その ckpt で calib_fit・calib_check・長尺 v1 を推論 → _dist_calib_v2.py fit/check → 採否を凍結 §11 に
+scripts/_run_v2final_gen.py
+scripts/step10_calib_sets_plan.py
+scripts/step10_eval_v3_plan.py
+scripts/_v26_regen_check.py
+scripts/_dist_calib_v2.py
+server_sde/_train_entrance_guard.py
+server_sde/calib_gen.sbatch
+md/design/calib_sets_v29.json
+md/design/v2final_params.json
+out/dataset_outdoor_siren_v2final_calib/plan/assignment_v2final.csv
+out/dataset_outdoor_siren_v2final_calib/plan/manifest_calib_strata.csv
+out/dataset_outdoor_siren_v2final_calib/plan/manifest_v26_bellbike.csv
+out/dataset_outdoor_siren_v2final_calib/plan/README_calib.md

@@ -19,7 +19,7 @@ pred_in = Path(sys.argv[1])
 out25 = Path(sys.argv[2])
 out60 = Path(sys.argv[3])
 
-pat = re.compile(r"fold20_room1_mix(\d{4})")
+pat = re.compile(r"(?:fold20_room1_mix|eval_syn_clip)(\d{4,5})")   # 2026-09-22 改名: 確定評価セットは eval_syn_clip（旧 fold20_room1_mix）
 
 
 def _core_only(clip: str) -> bool:

@@ -12,14 +12,15 @@ from __future__ import annotations
 import numpy as np
 
 from . import ablate
-from .geometry import SOUND_SPEED_20C, apparent_azel_deg
+from .geometry import SOUND_SPEED_20C, apparent_azel_deg, az_to_mic_frame
 
 
 def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
                      class_idx: int, track_idx: int = 0,
                      source_active_from: float = 0.0,
                      source_active_until: float | None = None,
-                     label_res: float = 0.1, c: float = SOUND_SPEED_20C):
+                     label_res: float = 0.1, c: float = SOUND_SPEED_20C,
+                     heading_deg=None):
     """1音源分のフレームラベル行を生成する。
 
     フレーム k の代表時刻は中心 (k+0.5)*label_res。
@@ -33,6 +34,9 @@ def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
         class_idx: クラスID
         track_idx: トラックID（単一音源なら0）
         source_active_until: 音源が発音を止める時刻（Noneなら軌道終端まで）
+        heading_deg: マイクの進む向き ψ [deg]（スカラーか (n_frames,)・geometry.mic_heading_deg）。与えると方位を
+            マイク座標 az_mic = wrap(az − ψ) にしてから丸める（FOA の rotate_to_mic_frame と同じ行列）。None = 今までどおり世界座標
+            （2026-10-26 Fable 仕様（先行分）§1・描画 v30 から）
     Returns:
         rows: list of (frame, class_idx, track_idx, az_int, el_int)
         debug: dict {t_frames, az, el, te, dist}（可視化用の連続値）
@@ -41,6 +45,9 @@ def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
     t_frames = (np.arange(n_frames) + 0.5) * label_res   # 各フレームの代表(中心)時刻
     # 音とFOAエンコードで使うのと同じ関数を呼ぶ＝方向がズレない一番の理由
     az, el, te, dist = apparent_azel_deg(t_frames, waypoints, receiver_pos, c)
+    az_world = az
+    if heading_deg is not None:
+        az = az_to_mic_frame(az, np.broadcast_to(np.asarray(heading_deg, dtype=np.float64), az.shape))
 
     active = np.isfinite(az)                 # 音がまだ届いていない(NaN)フレームは除外
     if ablate.MODE == "no_doppler":
@@ -73,6 +80,8 @@ def frame_label_rows(waypoints, receiver_pos, clip_len_sec: float,
             az_i = -180                       # 範囲を(-180,180]に統一（180は-180と同じ意味）
         rows.append((k, class_idx, track_idx, az_i, el_i))
     debug = {"t_frames": t_frames, "az": az, "el": el, "te": te, "dist": dist}
+    if heading_deg is not None:
+        debug["az_world"] = az_world
     return rows, debug
 
 

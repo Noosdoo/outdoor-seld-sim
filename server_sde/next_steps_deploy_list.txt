@@ -1,0 +1,24 @@
+# 次の手順の台本の配備（Astra RN20 の直し・2026-10-20）。台帳 = next_steps_expected_sha256.txt（サーバ側で作る）。
+# 配備: bash server_sde/_handoff_scripts_20261020/deploy_lists.sh server_sde/next_steps_deploy_list.txt next_steps_expected_sha256.txt
+server_sde/v2final_causal.sbatch
+server_sde/calib_infer.sbatch
+server_sde/v2final_conf_v3.sbatch
+server_sde/_causal_infer_long18.py
+server_sde/_prediction_integrity.py
+server_sde/_conf_exec_contract.py
+md/design/calib_sets_v29.json
+scripts/_score_unified.py
+scripts/_notify_detect.py
+scripts/step20_realsmoke_score_v3.py
+server_sde/v2final_train.sbatch
+scripts/_v2_ckpt_selector.py
+md/design/baselines_selected.json
+md/design/baselines_D_selection.json
+server_sde/_v2final_members.sh
+server_sde/_baselines_env.py
+server_sde/field_eval_infer.sbatch
+scripts/_filter_classes.py
+scripts/_perception_eval.py
+server_sde/v2final_abl_either.sbatch
+server_sde/hysteresis_patch.py
+server_sde/_train_sde17.py

@@ -42,7 +42,7 @@ cp -n $PS/datasets_v12/cls_indices_train.tsv $ROOTDIR/cls_indices_train.tsv
 
 # ② 距離GT（arm用ドライバ。基準のmetadata_distは触らない）
 cd $E2E
-PYTHONPATH=scripts:src ABLATE=$ABLATE $PY scripts/_run_v12_abl_labels.py
+PYTHONPATH=scripts:src ABLATE=$ABLATE $PY scripts_archive/_run_v12_abl_labels.py
 
 # ③ 空メタ許容ラベル抽出（index + accdoa + track + adpit、8クラス）
 cd $PS

@@ -49,7 +49,9 @@ from outdoor_seld.fastsim import render_mono  # noqa: E402
 from outdoor_seld.foa import encode_foa_timevarying, intensity_vector_doa  # noqa: E402
 from outdoor_seld.geometry import (doa_unit_vectors,  # noqa: E402
                                    receiver_positions_at,
-                                   solve_emission_times, sound_speed)
+                                   solve_emission_times, sound_speed,
+                                   mic_heading_deg, mic_heading_record,
+                                   rotate_to_mic_frame)
 from outdoor_seld.labels import (frame_label_rows, read_dcase_csv,  # noqa: E402
                                  write_dcase_csv)
 from outdoor_seld.noise import diffuse_foa_noise  # noqa: E402
@@ -146,6 +148,9 @@ TIER_CPA = {"critical": (0.6, 1.5), "caution": (1.55, 3.0), "safe": (3.2, 15.0)}
 TIERS = ("critical", "caution", "safe")
 GAP_FILL = 2                   # 車ラベルの可聴穴埋めフレーム数（パイロット規約）
 AUDIBLE_SNR_DB = 0.0           # 可聴ゲート: フレームA特性SNR >= 0dB
+# 2026-10-26 Fable 仕様（先行分）§1・決定 ⑩: マイクの正面を進む向き ψ(t) に回す（FOA とラベルの方位の両方を同じ R_z(−ψ) で）。
+# 既定は切（v29 までの出力は 1 バイトも変わらない）。描画 v30（step11_v30_render.py）が import 時に True にする。
+MIC_HEADING = False
 PROBE_RECV_DBA = 70.0          # プローブ: 受聴A特性レベルをこの値に正規化
 PROBE_NOISE_DBA = 45.0
 PROBE_WIN = (3.0, 7.0)
@@ -155,6 +160,39 @@ PEAK_MAX = 0.99
 # 最終的な正はgen時の実測ピーク assert）
 CREST = {"siren": 1.8, "horn": 3.5, "backup_beep": 1.6, "bike_bell": 4.0,
          "crossing": 1.7, "car_drive": 4.0}
+
+
+# ------------------------------------------------- #70（2026-10-19）の差し込み口 ----
+# 既定は 7〜8 月の版の振る舞いそのまま（この 4 つを差し替えなければ出力は 1 バイトも変わらない・乱数の消費も同じ）。
+# step11_v29_render.py が「クラス別の高さ」「横距離の抽選」「二輪・電車の高さ」に差し替える（変更票 #70・点検 K1〜K4）。
+SRC_Z_FIXED = {"kickboard": 1.5, "motorcycle": 1.5, "train_car": 1.5}   # 乱数を使わない音源の高さ（v12・v21・v27 の直書き 1.5 を 1 か所に）
+
+
+def draw_src_z(rng: np.random.Generator, cls: str) -> float:
+    """音源の高さ [m] を乱数 1 回で引く。旧 = 車も警告音も SRC_Z（0.8〜1.3）を共用（cls は使わない）。"""
+    return float(rng.uniform(*SRC_Z))
+
+
+def src_z_fixed(cls: str, row: dict) -> float:
+    """乱数を使わない音源の高さ [m]（キック・バイク・電車の車両）。旧 = 1.5 m 固定。"""
+    return float(SRC_Z_FIXED[cls])
+
+
+def src_z_range(cls: str) -> tuple:
+    """検査用: そのクラスの高さの範囲 (lo, hi)。旧 = SRC_Z か固定値。"""
+    if cls in SRC_Z_FIXED:
+        return (float(SRC_Z_FIXED[cls]), float(SRC_Z_FIXED[cls]))
+    return (float(SRC_Z[0]), float(SRC_Z[1]))
+
+
+def lane_offset(rng: np.random.Generator, tier: str, z: float, sign: float, cpa_range=None):
+    """車の横位置を乱数 1 回で引く。旧 = 層の 3 次元の最接近（TIER_CPA）を引き、マイク 1.5 m 基準で横距離に直す（点検 K1 の式）。
+    戻り = (cpa_3d_at_1p5m, y_signed)。cpa_range は probe（4〜8 m）や休眠の場面（crossing_wait）の直書きの範囲。"""
+    dz = MIC_STATIC[2] - z
+    lo, hi = cpa_range if cpa_range is not None else TIER_CPA[tier]
+    cpa = float(rng.uniform(max(lo, dz + 0.05), hi))
+    y = float(np.sqrt(max(cpa * cpa - dz * dz, 1e-6))) * sign
+    return cpa, y
 
 
 # ------------------------------------------------------------ 割当表の読込 ----
@@ -303,10 +341,8 @@ def sample_scenario2(row: dict, rng: np.random.Generator) -> dict:
                              "t_on": 0.0, "t_off": CLIP, "law_db": lv,
                              "l1m_db": l1m, "params": params})
         vc = float(rng.uniform(3.0, 8.0))          # 踏切へ減速接近（道交法33条）の等速近似
-        z = float(rng.uniform(*SRC_Z))
-        dz = MIC_STATIC[2] - z
-        cpa = float(rng.uniform(max(1.55, dz + 0.05), 3.0))
-        y = float(np.sqrt(max(cpa * cpa - dz * dz, 1e-6))) * car_sign
+        z = draw_src_z(rng, "car_drive")                                     # #70 の差し込み口（この場面は今の plan に行が無い）
+        cpa, y = lane_offset(rng, "caution", z, car_sign, cpa_range=(1.55, 3.0))
         t_cpa = float(rng.uniform(*CAR_TCPA))
         lvc, l1mc = _draw_level("car_drive", rng)
         f0 = 42.0 * float(rng.uniform(0.8, 1.2))
@@ -340,11 +376,8 @@ def sample_scenario2(row: dict, rng: np.random.Generator) -> dict:
     elif scen == "backup_reverse":
         vc = float(rng.uniform(*SPEED["backup_beep"]))   # 後退速度1-3m/s
         dirx = 1.0 if rng.random() < 0.5 else -1.0
-        z = float(rng.uniform(*SRC_Z))
-        dz = MIC_STATIC[2] - z
-        lo, hi = TIER_CPA[row["danger_tier"]]
-        cpa = float(rng.uniform(max(lo, dz + 0.05), hi))
-        y = float(np.sqrt(max(cpa * cpa - dz * dz, 1e-6))) * car_sign
+        z = draw_src_z(rng, "car_drive")                                     # #70 の差し込み口（この場面は今の plan に行が無い）
+        cpa, y = lane_offset(rng, row["danger_tier"], z, car_sign)
         t_cpa = float(rng.uniform(*CAR_TCPA))
         x0 = float(_mic_pos_at(mic, t_cpa)[0]) - dirx * vc * t_cpa
         wp = [[0.0, x0, y, z], [CLIP, x0 + dirx * vc * CLIP, y, z]]
@@ -368,7 +401,7 @@ def sample_scenario2(row: dict, rng: np.random.Generator) -> dict:
         vs = float(rng.uniform(8.0, 15.0))
         dirx = 1.0 if rng.random() < 0.5 else -1.0
         y = float(rng.uniform(10.0, 15.0)) * side
-        z = float(rng.uniform(*SRC_Z))
+        z = draw_src_z(rng, "siren")
         t_cpa = float(rng.uniform(*CAR_TCPA))
         x0 = float(_mic_pos_at(mic, t_cpa)[0]) - dirx * vs * t_cpa
         s["sources"].append({"class": "siren", "kind": "vehicle",
@@ -417,11 +450,8 @@ def sample_v10a(row: dict, rng: np.random.Generator) -> dict:
             tier = TIERS[int(rng.integers(3))]
         vc = float(rng.uniform(*SPEED["car_drive"]))
         dirx = 1.0 if rng.random() < 0.5 else -1.0
-        z = float(rng.uniform(*SRC_Z))
-        dz = MIC_STATIC[2] - z
-        lo, hi = TIER_CPA[tier]
-        cpa = float(rng.uniform(max(lo, dz + 0.05), hi))
-        y = float(np.sqrt(max(cpa * cpa - dz * dz, 1e-6))) * sign
+        z = draw_src_z(rng, "car_drive")                                     # #70 の差し込み口（この場面は今の plan に行が無い）
+        cpa, y = lane_offset(rng, tier, z, sign)
         t_cpa = float(rng.uniform(4.0, 9.0))
         lv, l1m = _draw_level("car_drive", rng)
         f0 = 42.0 * float(rng.uniform(0.8, 1.2))
@@ -454,7 +484,7 @@ def sample_v10a(row: dict, rng: np.random.Generator) -> dict:
             dirx = 1.0 if rng.random() < 0.5 else -1.0
             yw = float(rng.uniform(*WARN_OFFSET)) * side
             t_cpa = float(rng.uniform(*WARN_TCPA))
-            z = float(rng.uniform(*SRC_Z))
+            z = draw_src_z(rng, cls)
             dur = float(rng.uniform(*EVENT_DUR))
             t_on = float(rng.uniform(0.3, CLIP - dur - 0.3))
             x0 = -dirx * vw * t_cpa
@@ -502,7 +532,7 @@ def sample_scene_v9(row: dict) -> dict:
         vs = float(rng.uniform(*SPEED["siren"]))
         dirx = 1.0 if rng.random() < 0.5 else -1.0
         y = float(rng.uniform(*WARN_OFFSET)) * side
-        z = float(rng.uniform(*SRC_Z))
+        z = draw_src_z(rng, "siren")
         t_cpa = float(rng.uniform(*CAR_TCPA))
         x0 = float(_mic_pos_at(mic, t_cpa)[0]) - dirx * vs * t_cpa
         s["sources"].append({"class": "siren", "kind": "vehicle",
@@ -546,13 +576,10 @@ def sample_scene_v9(row: dict) -> dict:
     if row["car_side"] in ("L", "R"):
         v = float(rng.uniform(*SPEED["car_drive"]))
         dirx = 1.0 if rng.random() < 0.5 else -1.0
-        z = float(rng.uniform(*SRC_Z))
-        dz = MIC_STATIC[2] - z
-        lo, hi = ((4.0, 8.0) if is_probe else TIER_CPA[row["danger_tier"]])
-        cpa = float(rng.uniform(max(lo, dz + 0.05), hi))
-        # 両者ともx軸沿いなので 相対CPA = sqrt(y_off^2 + dz^2) が厳密に成り立つ
-        y_off = float(np.sqrt(max(cpa * cpa - dz * dz, 1e-6)))
-        y_off *= 1.0 if row["car_side"] == "L" else -1.0
+        z = draw_src_z(rng, "car_drive")                                     # #70 の差し込み口（既定 = SRC_Z）
+        # 旧: 3 次元の最接近を引いて sqrt(cpa^2 - dz^2) で横に（両者とも x 軸沿い）。v29 は横距離を直接引く。probe は 4〜8 m のまま
+        cpa, y_off = lane_offset(rng, row["danger_tier"], z, 1.0 if row["car_side"] == "L" else -1.0,
+                                 cpa_range=((4.0, 8.0) if is_probe else None))
         t_cpa = float(rng.uniform(*CAR_TCPA))
         lv, l1m = _draw_level("car_drive", rng)
         f0 = 42.0 * float(rng.uniform(0.8, 1.2))
@@ -591,7 +618,7 @@ def sample_scene_v9(row: dict) -> dict:
             dirx = -1.0 if row[f"{key}_side"] == "L" else 1.0   # L=+x側から接近
             lane = float(rng.uniform(2.5, 3.5))   # マイク停止線(y=-0.5)の先の車線
             t_pass = float(rng.uniform(6.5, 9.0))
-            z = float(rng.uniform(*SRC_Z))
+            z = draw_src_z(rng, cls)
             x0 = -dirx * v * t_pass
             src = {"class": cls, "kind": "vehicle",
                    "wp": [[0.0, x0, lane, z], [CLIP, x0 + dirx * v * CLIP, lane, z]],
@@ -602,7 +629,7 @@ def sample_scene_v9(row: dict) -> dict:
             dirx = 1.0 if rng.random() < 0.5 else -1.0
             y = float(rng.uniform(*(WARN_OFFSET if not is_probe else (5.0, 10.0)))) * side
             t_cpa = 5.0 if is_probe else float(rng.uniform(*WARN_TCPA))
-            z = float(rng.uniform(*SRC_Z))
+            z = draw_src_z(rng, cls)
             dur = 4.0 if is_probe else float(rng.uniform(*EVENT_DUR))
             t_on = PROBE_WIN[0] if is_probe else float(rng.uniform(0.3, CLIP - dur - 0.3))
             x0 = -dirx * v * t_cpa
@@ -688,10 +715,30 @@ def _render_stem(dry_cal: np.ndarray, wp: np.ndarray, mic, c: float):
         mic_at = (receiver_positions_at(tr, mic_arr) if mic_arr.ndim == 2
                   else mic_arr)
         u, _ = doa_unit_vectors(ps, mic_at)
+        if MIC_HEADING:                                   # 先行分 §1: direct と mirror を同じ ψ(tr) で回す
+            u = rotate_to_mic_frame(u, mic_heading_deg(mic_arr, tr))
         foas[tag] = encode_foa_timevarying(mono24, u)
     if not ablate.ground_enabled():
         return foas["direct"], foas["direct"]   # no_ground: 反射を加算しない
     return foas["direct"], foas["direct"] + foas["mirror"]
+
+
+def label_heading(mic):
+    """ラベルのフレーム中心 (k+0.5)×0.1 s のマイクの進む向き ψ [deg]（MIC_HEADING が切なら None = 世界座標のまま）。"""
+    if not MIC_HEADING:
+        return None
+    return mic_heading_deg(mic, (np.arange(int(round(CLIP / 0.1))) + 0.5) * 0.1)
+
+
+def side_mic_of(wp, mic, t: float, c: float) -> str:
+    """時刻 t（最接近）の音源の方位をマイク座標で見た左右（L = 方位が正・R = 負・真正面／真後ろ／未到達は空）。層別の表用（レビュー M5）。"""
+    from outdoor_seld.geometry import apparent_azel_deg, az_to_mic_frame
+    tt = np.array([float(t)])
+    az, _, _, _ = apparent_azel_deg(tt, np.asarray(wp, dtype=np.float64), mic, c)
+    a = float(az_to_mic_frame(az, mic_heading_deg(mic, tt))[0])
+    if not np.isfinite(a) or a == 0.0 or abs(a) == 180.0:
+        return ""
+    return "L" if a > 0 else "R"
 
 
 def _dist_series(wp, mic, tgrid: np.ndarray) -> np.ndarray:
@@ -783,7 +830,8 @@ def generate_clip(row: dict) -> None:
                                    clip_len_sec=CLIP, class_idx=cls_idx,
                                    track_idx=src.get("track", 0),
                                    source_active_from=src["t_on"],
-                                   source_active_until=src["t_off"], c=c)
+                                   source_active_until=src["t_off"], c=c,
+                                   heading_deg=label_heading(mic))
         if src["class"] == "car_drive":
             audible = _fill_gaps(snr >= AUDIBLE_SNR_DB, GAP_FILL)
             rows = [r for r in rows if audible[r[0]]]

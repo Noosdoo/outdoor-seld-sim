@@ -3,7 +3,7 @@
 #
 #   source _baseline_guard.sh; guard_record   # ジョブ冒頭で指紋を取る
 #   ...本処理...
-#   guard_verify                              # 末尾で照合。1バイトでも違えば非ゼロ終了
+#   guard_verify                              # 末尾で照合。サイズ・更新時刻・パスのどれかが違えば非ゼロ終了（内容ハッシュではない。2026-09-05 監査補足）
 #
 # 対象は ablation で絶対に書き換えてはいけないもの:
 #   - 基準データセット3種（v12 / v12_conf / v12_eval）
@@ -64,6 +64,6 @@ guard_verify() {
     echo "[guard] ABORT: 基準が書き換わりました。生成物を破棄して原因を調べてください。"
     return 1
   fi
-  echo "[guard] OK: 基準は1バイトも変わっていません"
+  echo "[guard] OK: 基準のサイズ・更新時刻・パスは不変です（内容ハッシュではない）"
   return 0
 }

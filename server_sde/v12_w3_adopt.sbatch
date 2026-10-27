@@ -37,7 +37,7 @@ EOF
 
 # ② core通知（v3.2凍結ルール・計上穴修正版）
 cd $E2E
-PYTHONPATH=scripts:src $PS/.venv/bin/python scripts/_v12_notify_server.py \
+PYTHONPATH=scripts:src $PS/.venv/bin/python scripts_archive/_v12_notify_server.py \
   $HOME/PSELDNets_logs/outdoor_siren_v12/runs/infer_v12_sde_w3_val/val_all.csv \
   $E2E/out/v12_notify_w3
 echo W3_ADOPT_DONE

@@ -54,6 +54,10 @@ export SDE_DIST_MODE=log
 
 ck=$(ls $HOME/PSELDNets_logs/outdoor_siren_v12/runs/$EXP/checkpoints/epoch_*.ckpt | head -1)
 echo "using ckpt: $ck"
+# 【2026-08-17 監査対応F】どのデータを読んだかをログに残す（従来は間接証拠しか無かった）
+echo "[paths] 自条件val  : dataset_dir=$ROOTDIR  hdf5_dir=$HDF5DIR"
+echo "[paths] フル物理val: dataset_dir=$PS/datasets_v12  hdf5_dir=$PS/_hdf5"
+ls -l $ROOTDIR/outdoor_siren_v12 $PS/datasets_v12/outdoor_siren_v12
 
 # 自条件val（そのarmの世界で学習し、その世界で採点＝「そもそも学習できるか」）
 .venv/bin/python _infer_sde12.py experiment=outdoor_siren_v12_valinfer mode=test \

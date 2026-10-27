@@ -47,14 +47,15 @@ m9.diffuse_foa_noise = diffuse_foa_urban_noise
 # クリップでピークが0.99を超えた（job248 shard4: mix3642 peak1.248）。全音源・背景を
 # 一律-6dBすることで相対関係（SNR・クラス間レベル・ラベル・マスク）は完全に不変のまま
 # クリッピングだけを回避する。記録されるrecv_*_db等の絶対値も-6dBシフトする（規約）。
-V12_HEADROOM_DB = 6.0
+from outdoor_seld.calibration import SYNTH_HEADROOM_DB as _SYNTH_HEADROOM_DB  # noqa: E402  値の正は calibration.py（2026-10-26 先行分 §3・実録の変換と共通）
+V12_HEADROOM_DB = _SYNTH_HEADROOM_DB    # = 6.0（旧の直書きと同じ値・出力は変わらない）
 _orig_gain_for_spl_a = m9.gain_for_spl_a
 m9.gain_for_spl_a = (lambda x, fs, db:
                      _orig_gain_for_spl_a(x, fs, db - V12_HEADROOM_DB))
 
 # ---- ②車のバリアント振り分け（audio_seed決定論、車単位） --------------------
 EV_FRAC = 0.15
-HEAVY_FRAC = 0.30       # EVでない車のうちではなく全車比（0.15<=u<0.45が大型）
+HEAVY_FRAC = 0.30       # 旧の既定（全車比・0.15<=u<0.45 が重い）。#70（2026-10-19・点検 K10）: step11_v29_render が 0.10 に差し替える（0.15<=u<0.25）
 TARGET_63_OVER_1K_DB = 3.0
 
 _orig_make_dry = m9._make_dry
@@ -135,9 +136,9 @@ def load_plan_v12ext() -> list:
 
 
 def _mic_sample(row: dict, rng: np.random.Generator):
-    """coreと同一規約のマイク（歩行: 速度U(1.0,1.4)・±x、中心対称の2点軌道）。"""
+    """coreと同一規約のマイク（歩行: 速度 U(m9.WALK_SPEED)＝旧 1.0〜1.4・±x、中心対称の2点軌道）。#70（点検 K2）: 直書きをやめ m9.WALK_SPEED を読む。"""
     if row["motion"] == "walk":
-        v = float(rng.uniform(1.0, 1.4))
+        v = float(rng.uniform(*m9.WALK_SPEED))
         d = float(rng.choice([-1.0, 1.0]))
         x0 = -d * v * 5.0
         arr = np.array([[0.0, x0, 0.0, 1.5], [m9.CLIP, x0 + d * v * m9.CLIP, 0.0, 1.5]])
@@ -157,8 +158,9 @@ def sample_v12kick(row: dict) -> dict:
     t_cpa = float(rng.uniform(3.0, 8.0))
     x0 = -dirx * speed * t_cpa
     law = float(rng.uniform(55.0, 65.0))     # 設計値dB(A)@1m（9月実録で較正予定）
+    zk = m9.src_z_fixed("kickboard", row)    # #70（点検 K4）: 旧 1.5 m 固定・v29 は 0.05〜0.2 m（乱数は別の種で消費しない）
     src = {"class": "kickboard", "kind": "vehicle", "track": 0,
-           "wp": [[0.0, x0, lat, 1.5], [m9.CLIP, x0 + dirx * speed * m9.CLIP, lat, 1.5]],
+           "wp": [[0.0, x0, lat, zk], [m9.CLIP, x0 + dirx * speed * m9.CLIP, lat, zk]],
            "t_on": 0.0, "t_off": m9.CLIP, "speed_mps": speed, "dir_x": dirx,
            "t_cpa_s": t_cpa, "law_db": law, "l1m_db": law,
            "params": {"audio_seed": row["seed"] * 7 + 21, "speed_mps": speed}}
@@ -181,8 +183,9 @@ def sample_v12bike(row: dict) -> dict:
     t_cpa = float(rng.uniform(3.0, 8.0))
     x0 = -dirx * speed * t_cpa
     l1m = law + 20.0 * np.log10(7.5)         # 加速走行騒音規制の7.5m測定→1m換算
+    zm = m9.src_z_fixed("motorcycle", row)   # #70（点検 K4）: 旧 1.5 m 固定・v29 は 0.05〜0.6 m
     src = {"class": "motorcycle", "kind": "vehicle", "track": 0,
-           "wp": [[0.0, x0, lat, 1.5], [m9.CLIP, x0 + dirx * speed * m9.CLIP, lat, 1.5]],
+           "wp": [[0.0, x0, lat, zm], [m9.CLIP, x0 + dirx * speed * m9.CLIP, lat, zm]],
            "t_on": 0.0, "t_off": m9.CLIP, "speed_mps": speed, "dir_x": dirx,
            "t_cpa_s": t_cpa, "law_db": law, "l1m_db": l1m,
            "params": {"audio_seed": row["seed"] * 7 + 23, "engine_class": ec,
@@ -214,6 +217,7 @@ def sample_v12train(row: dict) -> dict:
                 "pattern": "long" if rng.random() < 0.5 else "short3",
                 "t_start": float(rng.uniform(1.0, max(1.2, t_cpa - 1.0)))}
     labeled = {0: 0, n_cars // 2: 1, n_cars - 1: 2}
+    zt = m9.src_z_fixed("train_car", row)    # #70 r9: 電車の車両 1.5 m は据え置き（1 か所に）
     sources = []
     for i in range(n_cars):
         xi = x0 - dirx * i * 20.0
@@ -221,7 +225,7 @@ def sample_v12train(row: dict) -> dict:
             "class": "crossing", "kind": "vehicle",
             "track": labeled.get(i, 0), "no_label": i not in labeled,
             "train_car_index": i,
-            "wp": [[0.0, xi, y, 1.5], [m9.CLIP, xi + dirx * speed * m9.CLIP, y, 1.5]],
+            "wp": [[0.0, xi, y, zt], [m9.CLIP, xi + dirx * speed * m9.CLIP, y, zt]],
             "t_on": 0.0, "t_off": m9.CLIP, "speed_mps": speed, "dir_x": dirx,
             "law_db": law, "l1m_db": l1m_car,
             "params": {"audio_seed": row["seed"] * 7 + 40 + i, "train_car": True,
@@ -352,7 +356,8 @@ def generate_clip_v12(row: dict) -> None:
                                       clip_len_sec=m9.CLIP, class_idx=cls_idx,
                                       track_idx=src.get("track", 0),
                                       source_active_from=src["t_on"],
-                                      source_active_until=src["t_off"], c=c)
+                                      source_active_until=src["t_off"], c=c,
+                                      heading_deg=m9.label_heading(mic))     # 先行分 §1（切なら None＝今まで）
         if src["class"] in VEHICLE_GATED:
             audible = m9._fill_gaps(snr >= m9.AUDIBLE_SNR_DB, m9.GAP_FILL)
             rows = [r for r in rows if audible[r[0]]]
@@ -392,7 +397,7 @@ def generate_clip_v12(row: dict) -> None:
           f"peak={peak:.3f} ({s['stats']['gen_seconds']:.0f}s)", flush=True)
 
 
-def verify_copy_equiv(clip_id: str = "fold2_room1_mix0002") -> None:
+def verify_copy_equiv(clip_id: str = "val_syn_clip00002") -> None:      # 2026-09-22 改名（旧 fold2_room1_mix0002）
     """複製ドリフト検査: coreクリップをv12複製とm9原本の両方で生成→全ファイルsha一致。"""
     import hashlib
     rows = [r for r in m9.load_plan("core") if r["clip_id"] == clip_id]

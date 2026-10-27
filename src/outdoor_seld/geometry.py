@@ -232,3 +232,116 @@ def apparent_azel_deg(tr, waypoints, receiver_pos, c=SOUND_SPEED_20C):
         u, dist = doa_unit_vectors(ps_te, receiver_pos)              # その発射位置から方向ベクトルを作る
     az, el = unit_to_azel_deg(u)                                     # 角度[deg]に変換
     return az, el, te, dist
+
+
+# ---- マイクの正面を進む向きに回す（2026-10-26 Fable 仕様（先行分）§1・決定 ⑩・描画 v30 から） ----
+# 規約: 世界座標は +x 前・+y 左・+z 上。進む向き ψ(t) = atan2(vy, vx)（マイク経路の水平速度・度・上から見て反時計回りが正 =
+# 実録の yaw と同じ向き）。マイク座標 = 世界座標を z 軸まわりに ψ 回した座標で、単位ベクトルは R_z(−ψ) を掛けて移す
+# （az_mic = wrap(az_world − ψ)・仰角と距離は変わらない）。FOA（rotate_to_mic_frame）とラベル（az_to_mic_frame）は同じ行列を使う。
+
+def _mic_heading_segments(mic_arr, eps_speed: float = 1e-9):
+    """折れ線のマイク経路 (M,4) の区間ごとの進む向き [deg]（止まっている区間は直前の向き・最初から止まっていれば最初に動いた向き・
+    全部静止なら 0）。Returns: (times (M,), psi_seg (M−1,))"""
+    r = np.asarray(mic_arr, dtype=np.float64)
+    dt = np.diff(r[:, 0])
+    dxy = np.diff(r[:, 1:3], axis=0)
+    moving = (dt > 0) & (np.hypot(dxy[:, 0], dxy[:, 1]) > eps_speed * np.maximum(dt, 0.0))
+    psi = np.full(len(dt), np.nan)
+    psi[moving] = np.degrees(np.arctan2(dxy[moving, 1], dxy[moving, 0]))
+    psi = np.where(psi <= -180.0, psi + 360.0, psi)          # (−180, 180] にそろえる（atan2 の −0.0 対策）
+    if not np.any(moving):
+        return r[:, 0], np.zeros(len(dt))
+    first = int(np.argmax(moving))
+    psi[:first] = psi[first]                                  # 最初から止まっている → 最初に動いた向き
+    for i in range(first + 1, len(psi)):
+        if not moving[i]:
+            psi[i] = psi[i - 1]                               # 止まっている区間は直前の向きを保つ
+    return r[:, 0], psi
+
+
+def mic_heading_deg(mic_arr, t):
+    """マイク経路から各時刻の進む向き ψ(t) [deg]（(−180, 180]）。
+
+    mic_arr: (3,) 静止 → 全部 0（今までと同じ）／(M,4) [[t,x,y,z],...] の区分等速の折れ線。区間 [t_i, t_{i+1}) の向きを使い、
+    経路の範囲外（receiver_positions_at が端の値で止める所＝止まっている）は最初の区間・最後の区間の向き。
+    """
+    t = np.asarray(t, dtype=np.float64)
+    r = np.asarray(mic_arr, dtype=np.float64)
+    if r.ndim == 1 or len(r) < 2:
+        return np.zeros(t.shape)
+    times, psi = _mic_heading_segments(r)
+    idx = np.clip(np.searchsorted(times, t, side="right") - 1, 0, len(psi) - 1)
+    return psi[idx]
+
+
+def mic_heading_record(mic_arr):
+    """scene.json に書く形: 一定なら数、区間で変わるなら [[t0, ψ0], [t1, ψ1], ...]（区間の始まりと向き・同じ向きの続きはまとめる）。"""
+    r = np.asarray(mic_arr, dtype=np.float64)
+    if r.ndim == 1 or len(r) < 2:
+        return 0.0
+    times, psi = _mic_heading_segments(r)
+    steps = []
+    for t0, p in zip(times[:-1], psi):
+        if not steps or steps[-1][1] != float(p):
+            steps.append([float(t0), float(p)])
+    return steps[0][1] if len(steps) == 1 else steps
+
+
+def mic_heading_from_record(rec, t):
+    """mic_heading_record の値から各時刻の ψ [deg]（mic_heading_deg と同じ値。描き直さずに読む側＝距離ラベルなどが使う）。"""
+    t = np.asarray(t, dtype=np.float64)
+    if isinstance(rec, (int, float)):
+        return np.full(t.shape, float(rec))
+    st = np.asarray(rec, dtype=np.float64)
+    idx = np.clip(np.searchsorted(st[:, 0], t, side="right") - 1, 0, len(st) - 1)
+    return st[idx, 1]
+
+
+def _rz_minus(heading_deg):
+    """R_z(−ψ) の cos・sin（90 度の倍数で 0 や ±1 がちょうどになるよう、1e−12 未満は 0 に丸める）。"""
+    p = np.radians(np.asarray(heading_deg, dtype=np.float64))
+    c, s = np.cos(p), np.sin(p)
+    c = np.where(np.abs(c) < 1e-12, 0.0, c)
+    s = np.where(np.abs(s) < 1e-12, 0.0, s)
+    return c, s
+
+
+def rotate_to_mic_frame(u, heading_deg):
+    """(N,3) の単位ベクトル（世界座標）を R_z(−ψ) でマイク座標へ。heading_deg はスカラーか (N,)。ψ が全部 0 なら u をそのまま返す（bit 一致）。"""
+    u = np.asarray(u, dtype=np.float64)
+    h = np.asarray(heading_deg, dtype=np.float64)
+    if np.all(h == 0.0):
+        return u
+    c, s = _rz_minus(h)
+    out = u.copy()
+    out[..., 0] = c * u[..., 0] + s * u[..., 1]
+    out[..., 1] = -s * u[..., 0] + c * u[..., 1]
+    return out
+
+
+def az_to_mic_frame(az_deg, heading_deg):
+    """方位 [deg]（世界座標）をマイク座標へ（rotate_to_mic_frame と同じ行列・結果は (−180, 180]）。NaN は NaN のまま。ψ が全部 0 なら az をそのまま返す。"""
+    az = np.asarray(az_deg, dtype=np.float64)
+    h = np.asarray(heading_deg, dtype=np.float64)
+    if np.all(h == 0.0):
+        return az
+    a = np.radians(az)
+    c, s = _rz_minus(h)
+    ux, uy = np.cos(a), np.sin(a)
+    out = np.degrees(np.arctan2(-s * ux + c * uy, c * ux + s * uy))
+    return np.where(out <= -180.0, out + 360.0, out)
+
+
+def circular_mean_deg(angles_deg, min_resultant: float = 1e-6):
+    """方位の「真ん中」を円周統計で（単位ベクトルの平均の向き・step20_realsmoke_score_v3.median_az と同じ sin/cos の和）。
+    NaN は欠測として外す。1 つも無ければ None。打ち消し合って向きが決まらない（合成ベクトルの長さ / 本数 < min_resultant）なら None。
+    結果は (−180, 180]（2026-10-26 Astra R30-09・先行分 §8）。"""
+    a = np.asarray(angles_deg, dtype=np.float64).ravel()
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return None
+    x, y = float(np.sum(np.cos(np.radians(a)))), float(np.sum(np.sin(np.radians(a))))
+    if np.hypot(x, y) / a.size < min_resultant:
+        return None
+    m = float(np.degrees(np.arctan2(y, x)))
+    return m + 360.0 if m <= -180.0 else m

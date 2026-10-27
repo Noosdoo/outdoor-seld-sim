@@ -65,8 +65,8 @@ REFRACT_DEG = 45.0               # v1: 方向別±45°
 WIN_PRE, WIN_POST = 1.0, 1.0
 
 CLS_IDX = {"siren": 0, "horn": 1, "backup_beep": 2, "bike_bell": 3,
-           "car_drive": 4, "crossing": 5, "kick": 6, "bike": 7}
-DIST_CLS = {4, 6, 7}
+           "car_drive": 4, "crossing": 5, "kick": 6, "bike": 7, "bicycle": 8}
+DIST_CLS = {4, 6, 7, 8}      # 8 = bicycle（2026-10-08 変更票 #48）
 LATERAL_KEYS = ("横距離m", "横距離", "lateral_m")
 
 
@@ -106,18 +106,45 @@ def is_scored(row) -> bool:
     return str(v).strip().lower() not in ("0", "false", "no")
 
 
-def lateral_of(row):
+
+def parse_lateral(text):
+    """横距離の記入を (lo, hi) に読む。単一値 "2.0" → (2.0, 2.0)、幅 "1.5-2.5"（〜 も可・全角も可）→ (1.5, 2.5)。
+    形式違い・負・NaN・lo>=hi は None（R11・2026-09-07）。"""
+    if text is None:
+        return None
+    t = str(text).strip().replace("〜", "-").replace("～", "-").replace("－", "-")
+    t = "".join(chr(ord(c) - 0xFEE0) if "０" <= c <= "９" or c == "．" else c for c in t)
+    if t == "":
+        return None
+    parts = t.split("-")
+    if len(parts) not in (1, 2):
+        return None
+    try:
+        vals = [float(x) for x in parts]
+    except ValueError:
+        return None
+    if any(not np.isfinite(v) or v < 0 for v in vals):
+        return None
+    lo, hi = (vals[0], vals[0]) if len(vals) == 1 else (vals[0], vals[1])
+    if len(vals) == 2 and not lo < hi:
+        return None
+    return lo, hi
+
+def lateral_range_of(row):
+    """行の横距離を (lo, hi) で返す（幅の記入に対応・R11）。無効なら None。"""
     for k in LATERAL_KEYS:
         v = row.get(k)
         if v not in (None, ""):
-            try:
-                lateral_m = float(v)
-            except (TypeError, ValueError):
-                return None
-            # NaN/Infinityは比較演算をすり抜けてsafeへ分類され得るため、
-            # 横距離として有効な有限・非負値だけを採用する。
-            return lateral_m if np.isfinite(lateral_m) and lateral_m >= 0.0 else None
+            return parse_lateral(v)
     return None
+
+
+def lateral_of(row):
+    """単一値の横距離[m]。幅で書かれた行は None（v2 では未採点。v3 は lateral_range_of で境界例として扱う）。"""
+    rng = lateral_range_of(row)
+    if rng is None or rng[0] != rng[1]:
+        return None
+    return rng[0]
 
 
 # ---------------------------------------------------------------- 予測の読込

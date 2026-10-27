@@ -1,0 +1,24 @@
+# 比べる相手（変更票 #73）の配備（2026-10-20〜）。台帳 = baselines_expected_sha256.txt（サーバ側で作る）。
+# 配備: bash server_sde/_handoff_scripts_20261020/deploy_lists.sh server_sde/baselines_deploy_list.txt baselines_expected_sha256.txt
+server_sde/_baseline_D_pretrain170_infer.py
+server_sde/_baseline_merge.py
+server_sde/baseline_D_smoke.sbatch
+server_sde/_baseline_A_panns_iv_infer.py
+server_sde/baseline_A_smoke.sbatch
+server_sde/_baseline_B_common.py
+server_sde/_baseline_B_prepare.py
+server_sde/_baseline_B_train.py
+server_sde/_baseline_B_infer.py
+server_sde/baseline_B_smoke.sbatch
+server_sde/baseline_B_prepare.sbatch
+server_sde/baseline_B_train.sbatch
+server_sde/baseline_B_select.sbatch
+scripts/_baseline_select_gain.py
+server_sde/_baseline_B_causal_check.py
+md/design/baselines_class_map_v1.json
+md/design/baselines_class_map_v2.json
+out/_baselines/cls_indices_train_pseldnets170.tsv
+out/_baselines/audioset_class_labels_indices.csv
+server_sde/baseline_D_select.sbatch
+out/dataset_outdoor_siren_v2final/plan/manifest_val_select.csv
+out/dataset_outdoor_siren_v2final/plan/manifest_val_check.csv

@@ -1,0 +1,72 @@
+# v28（組み合わせの積み増し・本人決定 2026-10-13 14:45・Opus R-1／M-1）のサーバ配備の一覧（Fable）。配備は本人の許可のあと。
+# v27_deploy_list.txt の全部（描画の連なりは同一・台帳 v28_expected_sha256.txt を作り直す）＋ v28 の 4 本（step10_v28_plan.py・manifest_v28_topup.csv・REGEN_H_counts_v27.csv・v28_topup.sbatch）＋ H 検査つきの _v26_regen_check.py。
+# 手順: (1) job 6347 のあと scripts/_v26_regen_check.py（H つき）を先に配備して検査 A〜H → REGEN_H_counts.csv を手元に写す（out/dataset_outdoor_siren_v2final/plan/REGEN_H_counts_v27.csv）
+#       (2) 手元で step10_v28_plan.py --table（本人に表を見せる）→ 本人 OK → step10_v28_plan.py（plan・manifest・params を書く）→ commit
+#       (3) この一覧を配備（sha 照合・台帳をサーバ側で）→ sbatch server_sde/v28_topup.sbatch（本人の許可・区画は -p で選ぶ）→ 検査 A〜H → 学習
+# 実行時に読み込むモジュール（生成器を import して実測・Astra MIX13-07。変更が無くても台帳に入れる）
+scripts/step11_v10_render.py
+scripts/step11_v10_1_render.py
+scripts/step11_v10_1b_render.py
+scripts/step11_v11_render.py
+src/outdoor_seld/__init__.py
+src/outdoor_seld/ablate.py
+src/outdoor_seld/kickboard.py
+src/outdoor_seld/noise_v12.py
+src/outdoor_seld/rain.py
+src/outdoor_seld/scene.py
+src/outdoor_seld/train.py
+scripts/_run_v2final_gen.py
+scripts/step11_v23_render.py
+scripts/step11_v24_render.py
+scripts/step11_v25_render.py
+scripts/step11_v26_render.py
+scripts/step11_v27_render.py
+scripts/step11_v22_render.py
+scripts/step11_v9_render.py
+scripts/step11_v12_render.py
+scripts/step11_v13_render.py
+scripts/step11_v14_render.py
+scripts/step11_v16_render.py
+scripts/step11_v19_render.py
+scripts/step11_v21_render.py
+src/outdoor_seld/alert_sounds.py
+src/outdoor_seld/bike_bell_v2.py
+src/outdoor_seld/bicycle_v2.py
+src/outdoor_seld/calibration.py
+src/outdoor_seld/engine.py
+src/outdoor_seld/engine_ev.py
+src/outdoor_seld/engine_heavy.py
+src/outdoor_seld/fastsim.py
+src/outdoor_seld/motorcycle.py
+src/outdoor_seld/siren.py
+src/outdoor_seld/noise.py
+src/outdoor_seld/geometry.py
+src/outdoor_seld/labels.py
+src/outdoor_seld/foa.py
+scripts/step10_v25_plan.py
+scripts/step10_v27_plan.py
+scripts/step10_v28_plan.py
+scripts/level_match_v24.py
+scripts/step19_dist_labels_v2final.py
+scripts/test_sound_reference_v26.py
+scripts/_v26_regen_check.py
+src/outdoor_seld/alert_sounds_v23.py
+src/outdoor_seld/level_v24.py
+src/outdoor_seld/engine_heavy_v25.py
+src/outdoor_seld/siren_v26.py
+src/outdoor_seld/avas_v26.py
+md/design/level_match_v24.json
+md/design/sound_reference_v26.json
+md/design/v2final_params.json
+out/dataset_outdoor_siren_v2final/plan/assignment_v2final.csv
+out/dataset_outdoor_siren_v2final/plan/manifest_v26_bellbike.csv
+out/dataset_outdoor_siren_v2final/plan/manifest_v27_mix.csv
+out/dataset_outdoor_siren_v2final/plan/manifest_v28_topup.csv
+out/dataset_outdoor_siren_v2final/plan/REGEN_H_counts_v27.csv
+server_sde/v27_gen.sbatch
+server_sde/v28_topup.sbatch
+server_sde/_train_entrance_guard.py
+server_sde/v2final_train.sbatch
+server_sde/v2final_causal.sbatch
+server_sde/v2final_dev_train.sh
+server_sde/v2final_dev_causal.sh

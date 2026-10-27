@@ -77,11 +77,8 @@ def sample_v11core(row: dict, rng: np.random.Generator) -> dict:
             tier = m9.TIERS[int(rng.integers(3))]
         vc = float(rng.uniform(*m9.SPEED["car_drive"]))
         dirx = 1.0 if rng.random() < 0.5 else -1.0
-        z = float(rng.uniform(*m9.SRC_Z))
-        dz = m9.MIC_STATIC[2] - z
-        lo, hi = m9.TIER_CPA[tier]
-        cpa = float(rng.uniform(max(lo, dz + 0.05), hi))
-        y = float(np.sqrt(max(cpa * cpa - dz * dz, 1e-6))) * sign
+        z = m9.draw_src_z(rng, "car_drive")                                  # #70 の差し込み口（既定 = SRC_Z・v29 はクラス別）
+        cpa, y = m9.lane_offset(rng, tier, z, sign)                           # 既定 = 3 次元の最接近 → 横（点検 K1）・v29 は横距離を直接引く
         t_cpa = float(rng.uniform(*tcpa_rng))
         lv, l1m = m9._draw_level("car_drive", rng)
         f0 = 42.0 * float(rng.uniform(0.8, 1.2))
@@ -118,7 +115,7 @@ def sample_v11core(row: dict, rng: np.random.Generator) -> dict:
             dirx = 1.0 if rng.random() < 0.5 else -1.0
             yw = float(rng.uniform(*m9.WARN_OFFSET)) * side
             t_cpa = float(rng.uniform(*m9.WARN_TCPA))
-            z = float(rng.uniform(*m9.SRC_Z))
+            z = m9.draw_src_z(rng, cls)                                       # #70: クラクション・バック音・ベルの高さ（サイレンは v24 が上書き）
             dur = float(rng.uniform(*m9.EVENT_DUR))
             t_on = float(rng.uniform(0.3, m9.CLIP - dur - 0.3))
             x0 = -dirx * v * t_cpa
@@ -311,7 +308,7 @@ _SMOKE_CONDS = [
      and r["danger_tier"] == "critical"),
     # precheckのピーク上限バウンドが唯一1.0を超えた行（1.046、保守的バウンド）。
     # 実測ピーク<0.99をスモークで確認する（precheck_report.md 2026-07-27）
-    ("ピーク上限最大行", lambda r: r["clip_id"] == "fold1_room1_mix4568"),
+    ("ピーク上限最大行", lambda r: r["clip_id"] in ("train_syn_clip04568", "fold1_room1_mix4568")),   # 2026-09-22 改名（新旧どちらも）
 ]
 
 

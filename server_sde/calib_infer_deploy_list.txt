@@ -1,0 +1,4 @@
+# 補正表の推論の台本の配備（#72・2026-10-20）。台帳 = calib_infer_expected_sha256.txt（サーバ側で作る）。
+server_sde/calib_infer.sbatch
+server_sde/_causal_infer_long17.py
+server_sde/_causal_infer_v17.py

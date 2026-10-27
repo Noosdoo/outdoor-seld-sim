@@ -50,11 +50,16 @@ This repository is that recipe, plus the evaluation harness around it.
 | `src/outdoor_seld/foa.py` | Analytic FOA encoder (W,Y,Z,X / SN3D) and intensity-vector DOA estimation |
 | `src/outdoor_seld/labels.py` | DCASE 5-column CSV writer (emission-time corrected DOA) |
 | `src/outdoor_seld/scene.py` | Scene definition, simulator wrapper, decimation |
-| `src/outdoor_seld/siren.py`, `noise.py`, `motorcycle.py`, `kickboard.py` | Synthetic sources and background noise |
+| `src/outdoor_seld/siren_v26.py`, `alert_sounds_v23.py`, `bike_bell_v2.py` | Warning sounds: siren, horn, backup beeper, bicycle bell |
+| `src/outdoor_seld/engine.py`, `engine_ev.py`, `avas_v26.py`, `motorcycle.py`, `kickboard.py`, `bicycle_v2.py`, `train.py` | Vehicle sources: cars (incl. EV/HV approach sound), motorcycles, e-scooters, bicycles, trains |
+| `src/outdoor_seld/noise_v30.py`, `rain.py` | Urban background with per-clip spectral shape, rain |
+| `src/outdoor_seld/calibration.py`, `level_v24.py`, `band_gate.py` | Absolute level calibration (dB SPL), level design, in-band audibility gate for labels |
 | `src/outdoor_seld/fastsim.py` | Fast renderer, waveform-matched to the reference simulator (rel. RMS 3.4e-05) |
-| `scripts/step0..step20` | Validation, generation, labelling, training, scoring, notification |
+| `scripts/step10_*`, `step11_*` | Scene planning and rendering, one script per dataset version |
+| `scripts/step12_*`, `step20_*` | Notification layer and scoring |
+| `scripts/step19*` | Field-recording tools: conversion, annotation, video-based ground truth |
 | `server_sde/*.sbatch` | SLURM jobs for cluster runs |
-| `tests/` | 39 physics/convention checks |
+| `tests/` | Physics and convention checks (see below) |
 
 ## Correctness, not vibes
 
@@ -84,16 +89,19 @@ below −60 dB.
 python tests/test_geometry.py   # 12 checks — emission time, Doppler, az/el round-trip
 python tests/test_foa.py        # 13 checks — ACN/SN3D gains, IV-DOA recovery
 python tests/test_noise.py      #  8 checks — pink/brown spectra, diffuse FOA noise
+python -m pytest tests/test_doppler_direction.py   # 2 tests — pitch drops after the pass, walking observer
 python tests/test_fastsim.py    #  6 checks — fast renderer vs reference simulator
 ```
 
-Last full run: **39 checks, 0 failed** (2026-08-16).
-
-The first three run in CI on Linux and Windows. `test_fastsim.py` compares the fast
-renderer against a previously generated clip, so it needs `scripts/step1_generate_clip.py`
-to have been run first and is therefore local-only.
+The first four run in CI on Linux and Windows on every push (33 checks + 2 tests).
+`test_fastsim.py` compares the fast renderer against a previously generated clip, so it
+needs a clip rendered by the pipeline first and is local-only.
 
 ## Results so far
+
+These numbers are from **v0.1.0 (August 2026)**. The model is being retrained on the
+current data recipe and the evaluation will be redone once, on a sealed test set; the
+final numbers will be published with the thesis.
 
 Synthetic held-out evaluation (development evaluation, 3,342 clips). Detection rate at
 SNR ≥ 0 dB, and median direction-of-arrival error:
@@ -123,7 +131,7 @@ Stated plainly, because they matter more than the good numbers:
 - **Quiet EVs**: 20.0 % — when a car is near-silent, there is nothing to hear. The same wall
   human listeners hit in NHTSA's quiet-vehicle studies.
 - Sudden appearance from behind an occluder: 84.7 %, median lead 1.47 s.
-- Most design and audit documents are currently in Japanese. Translation is underway.
+- Comments in the code are mostly Japanese.
 
 ## Built on
 
@@ -141,11 +149,27 @@ wearables for the hearing impaired (Sensors 2023) classify sounds without direct
 This project targets the gap: an open, physically controllable outdoor generator, multi-class
 and multi-source, with a notification layer that is evaluated rather than demonstrated.
 
+## Upstream contributions
+
+- [Jinbo-Hu/PSELDNets#6](https://github.com/Jinbo-Hu/PSELDNets/pull/6) — fix dataset name
+  parsing on Windows (`path.split('/')` → `Path(path).parts`). Merged 2026-10-27.
+
+## What changed in v0.2.0
+
+- New and revised sound sources: warning sounds (3rd revision), siren (6th), bicycle
+  rolling sound and bell modelled on measurements, EV/HV approach sound (AVAS),
+  rain, and an urban background whose spectral shape varies per clip
+- Absolute level design in dB SPL and an in-band audibility gate, so a label is only
+  emitted when the source is actually audible above the background
+- Field-recording toolchain for the real-world evaluation: conversion, annotation and
+  video-based ground truth (`scripts/step19*`)
+- Stable clip identifiers (`src/outdoor_seld/clip_ids.py`)
+- CI now also checks the direction of the Doppler shift
+
 ## Documentation
 
-Design notes, audit records, experiment plans and result logs live in `md/` (Japanese;
-translation is underway). The original Japanese operating README is
-[README.ja.md](README.ja.md), and `PROGRESS.md` is the running development log.
+Internal design notes, audit records and field-recording logs are not published, because
+they include details about recording participants and locations. The code is complete.
 
 ## License
 

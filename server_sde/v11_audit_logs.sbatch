@@ -27,7 +27,7 @@ cp $E2E/server_sde/test_sde_units.py $E2E/server_sde/test_sde_units2.py \
   # 実際に実行するファイル自体のハッシュを証跡として残す
   sha256sum test_sde_units.py test_sde_units2.py test_sde_units3.py \
             sde_patch.py _preproc_sde.py \
-            $E2E/scripts/step12_notify_v33.py $E2E/scripts/_v12_notify_server33.py
+            $E2E/scripts/step12_notify_v33.py $E2E/scripts_archive/_v12_notify_server33.py
   echo "== T1-T3 (test_sde_units.py) =="
   .venv/bin/python test_sde_units.py
   echo "== T4-T5+旧T6 (test_sde_units2.py) =="
@@ -48,8 +48,8 @@ cp $HOME/PSELDNets_logs/outdoor_siren_v12/runs/outdoor_siren_v12_sde_w3/train.lo
 # v12 core通知 v3.3（連結25°）と v3.4（連結60°=設計定数由来）の両方（w3予測）
 cd $E2E
 W3VAL=$HOME/PSELDNets_logs/outdoor_siren_v12/runs/infer_v12_sde_w3_val/val_all.csv
-PYTHONPATH=scripts:src $PS/.venv/bin/python scripts/_v12_notify_server33.py \
+PYTHONPATH=scripts:src $PS/.venv/bin/python scripts_archive/_v12_notify_server33.py \
   $W3VAL $E2E/out/v12_notify_w3_v33
 NOTIFY_LINK_DEG=60 PYTHONPATH=scripts:src $PS/.venv/bin/python \
-  scripts/_v12_notify_server33.py $W3VAL $E2E/out/v12_notify_w3_v34
+  scripts_archive/_v12_notify_server33.py $W3VAL $E2E/out/v12_notify_w3_v34
 echo AUDIT_LOGS_DONE

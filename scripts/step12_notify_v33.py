@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -73,8 +74,11 @@ def role_of(dmin):
 def load_preds():
     pred_ev = defaultdict(lambda: defaultdict(list))
     dists = defaultdict(lambda: defaultdict(list))
+    from outdoor_seld.clip_ids import normalize as _norm     # 2026-09-22 改名: 旧名の予測も新名に正規化
     for line in open(PRED, encoding="utf-8"):
         p = line.strip().split(",")
+        if p and p[0]:
+            p[0] = _norm(p[0])
         if len(p) >= 7:
             clip, k, c, az, el, d = (p[0], int(p[1]), int(p[2]),
                                      float(p[4]), float(p[5]), float(p[6]))
@@ -91,9 +95,10 @@ def load_preds():
 
 def manifest_clips(pred_keys):
     """【条件2】予測キーのfold接頭辞に一致する全metadata_distクリップ。"""
-    prefixes = {k.rsplit("_mix", 1)[0] for k in pred_keys}
+    _prefix = lambda k: re.sub(r"_(mix|clip)\d+$", "", k)          # 2026-09-22 改名: 旧 …_mixN でも新 …_clipN でも区分の接頭辞
+    prefixes = {_prefix(k) for k in pred_keys}
     clips = {p.stem for p in (DS / "metadata_dist").glob("*.csv")
-             if p.stem.rsplit("_mix", 1)[0] in prefixes}
+             if _prefix(p.stem) in prefixes}
     clips |= set(pred_keys)
     if MANIFEST_FILTER is not None:
         clips = {c for c in clips if MANIFEST_FILTER(c)}

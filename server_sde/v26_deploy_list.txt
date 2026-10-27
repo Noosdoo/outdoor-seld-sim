@@ -1,0 +1,62 @@
+# 描き直し（v23〜v26）のサーバ配備の一覧（2026-10-12・Fable）。配備は本人の許可のあと。scp のあと sha256 を照合し、台帳 v26_expected_sha256.txt はサーバ側（LF）で作る。
+# 1. scp する（手元 → サーバ ~/research/outdoor_seld_e2e/ の同じ相対パス）
+scripts/_run_v2final_gen.py
+scripts/step11_v23_render.py
+scripts/step11_v24_render.py
+scripts/step11_v25_render.py
+scripts/step11_v26_render.py
+scripts/step11_v22_render.py
+scripts/step11_v9_render.py
+scripts/step11_v12_render.py
+scripts/step11_v13_render.py
+scripts/step11_v14_render.py
+scripts/step11_v16_render.py
+scripts/step11_v19_render.py
+scripts/step11_v21_render.py
+src/outdoor_seld/alert_sounds.py
+src/outdoor_seld/bike_bell_v2.py
+src/outdoor_seld/bicycle_v2.py
+src/outdoor_seld/calibration.py
+src/outdoor_seld/engine.py
+src/outdoor_seld/engine_ev.py
+src/outdoor_seld/engine_heavy.py
+src/outdoor_seld/fastsim.py
+src/outdoor_seld/motorcycle.py
+src/outdoor_seld/siren.py
+src/outdoor_seld/noise.py
+src/outdoor_seld/geometry.py
+src/outdoor_seld/labels.py
+src/outdoor_seld/foa.py
+scripts/step10_v25_plan.py
+scripts/level_match_v24.py
+scripts/step19_dist_labels_v2final.py
+scripts/test_sound_reference_v26.py
+scripts/_v26_regen_check.py
+src/outdoor_seld/alert_sounds_v23.py
+src/outdoor_seld/level_v24.py
+src/outdoor_seld/engine_heavy_v25.py
+src/outdoor_seld/siren_v26.py
+src/outdoor_seld/avas_v26.py
+md/design/level_match_v24.json
+md/design/sound_reference_v26.json
+md/design/v2final_params.json
+out/dataset_outdoor_siren_v2final/plan/assignment_v2final.csv
+out/dataset_outdoor_siren_v2final/plan/manifest_v26_bellbike.csv
+server_sde/v26_gen.sbatch
+server_sde/_train_entrance_guard.py
+server_sde/v2final_train.sbatch
+server_sde/v2final_causal.sbatch
+server_sde/v2final_dev_train.sh
+server_sde/v2final_dev_causal.sh
+# 2. サーバで台帳を作る（v26_gen.sbatch が照合する。手元の CRLF と違うのでサーバ側で作る）
+#    cd ~/research/outdoor_seld_e2e && sha256sum scripts/_run_v2final_gen.py scripts/step11_v9_render.py scripts/step11_v12_render.py scripts/step11_v13_render.py scripts/step11_v14_render.py scripts/step11_v16_render.py \
+#      scripts/step11_v19_render.py scripts/step11_v21_render.py scripts/step11_v22_render.py scripts/step11_v23_render.py scripts/step11_v24_render.py scripts/step11_v25_render.py scripts/step11_v26_render.py \
+#      src/outdoor_seld/alert_sounds.py src/outdoor_seld/alert_sounds_v23.py src/outdoor_seld/bike_bell_v2.py src/outdoor_seld/bicycle_v2.py src/outdoor_seld/calibration.py src/outdoor_seld/engine.py \
+#      src/outdoor_seld/engine_ev.py src/outdoor_seld/engine_heavy.py src/outdoor_seld/engine_heavy_v25.py src/outdoor_seld/fastsim.py src/outdoor_seld/level_v24.py src/outdoor_seld/motorcycle.py \
+#      src/outdoor_seld/siren.py src/outdoor_seld/siren_v26.py src/outdoor_seld/avas_v26.py src/outdoor_seld/noise.py src/outdoor_seld/geometry.py src/outdoor_seld/labels.py src/outdoor_seld/foa.py \
+#      md/design/level_match_v24.json md/design/v2final_params.json scripts/step19_dist_labels_v2final.py scripts/step10_v2final_relabel.py server_sde/_v2final_gen_complete_check.py \
+#      server_sde/_train_entrance_guard.py out/dataset_outdoor_siren_v2final/plan/assignment_v2final.csv > server_sde/v26_expected_sha256.txt
+#    手元の値（LF に直して）と 1 本ずつ一致することを確かめてから投入する。
+# 2b. 台帳の対象に src/outdoor_seld の音の本体（v9〜v22 の連なりも）が入っていることを確かめる（AR12-07）。**draft で描くか fixed で描くかを先に決める**（AR12-05・投入後は束の印でしか分からない）。
+# 3. 投入の前に手元で: python scripts/test_v2final_sound_v23_v25.py（S1〜S10）・python scripts/test_run_v2final_gen_reuse.py・params の status（fixed にするのは本人）
+# 4. 投入: sbatch server_sde/v26_gen.sbatch（本人の許可）。終わったら python scripts/_v26_regen_check.py --ds out/dataset_outdoor_siren_v2final_v26 と、REGEN_CHECK.md の試聴の候補を本人が聞く。

@@ -31,6 +31,10 @@ HDF5DIR=$PS/_hdf5_abl_${ABLATE}
 ck=$HOME/PSELDNets_logs/outdoor_siren_v12/runs/$EXP/checkpoints/$CK_NAME
 [ -f "$ck" ] || { echo "ckptが無い: $ck"; exit 1; }
 echo "using ckpt: $ck"
+# 【2026-08-17 監査対応F】どのデータを読んだかをログに残す（従来は間接証拠しか無かった）
+echo "[paths] 自条件val  : dataset_dir=$ROOTDIR  hdf5_dir=$HDF5DIR"
+echo "[paths] フル物理val: dataset_dir=$PS/datasets_v12  hdf5_dir=$PS/_hdf5"
+ls -l $ROOTDIR/outdoor_siren_v12 $PS/datasets_v12/outdoor_siren_v12
 
 cd $PS
 # 自条件val（その世界で学習し、その世界で採点）

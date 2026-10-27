@@ -25,6 +25,52 @@ DIST_MODE = os.environ.get("SDE_DIST_MODE", "log")
 LOG_K = float(np.log1p(100.0))
 XYZ_IDX = [0, 1, 2, 4, 5, 6, 8, 9, 10]
 D_IDX = [3, 7, 11]
+# 変更票 #75（2026-10-26・④・Fable の敵対的レビュー M3）: 距離の MSE を「教師が活動しているフレームだけ」で平均する。
+# SDE_DIST_MASK=1 で有効。既定 0 = 旧の式（全 [B,T,C] の平均・v29 までの ckpt と同じ）。v30 の学習の sbatch が 1 を立てて記録する。
+DIST_MASK = os.environ.get("SDE_DIST_MASK", "0") == "1"
+
+
+def sde_loss_terms(out, tgt, dist_mask: bool = DIST_MASK):
+    """ADPIT の置換選択（xyz だけで選ぶ）と、選ばれた置換の距離の項。戻り = (sel_xyz, sel_d)（どちらもスカラの tensor）。
+
+    out: [B,T,12*C]（track×4 軸 ×C）・tgt: [B,T,6,5,C]（5 軸 = se, x, y, z, dist）。
+    dist_mask=False: 旧の式。距離の MSE を 3 track で平均 → 全 [B,T,C] で平均（活動の無い所も 0 に引く）。
+    dist_mask=True: 順列と pads を足したあとの教師 t_full から活動（各 track の xyz の長さ > 0.5 ＝ se が 1）を作り、
+    活動のある (B,T,track,C) だけ距離の MSE を足して、分母 = 活動の数（0 なら 1 → 損失 0・NaN なし）。
+    選ばれた置換は xyz で決める（旧と同じ）。W_DIST の掛け算は呼び手で行う。"""
+    import torch
+    tok = [tgt[:, :, i, 0:1, :] * tgt[:, :, i, 1:, :] for i in range(6)]       # 各 [B,T,4,C]
+    A0, B0, B1, C0, C1, C2 = tok
+    perms = [
+        (A0, A0, A0), (B0, B0, B1), (B0, B1, B0), (B0, B1, B1),
+        (B1, B0, B0), (B1, B0, B1), (B1, B1, B0),
+        (C0, C1, C2), (C0, C2, C1), (C1, C0, C2), (C1, C2, C0),
+        (C2, C0, C1), (C2, C1, C0)]
+    catA = torch.cat((A0, A0, A0), 2)
+    catB = torch.cat((B0, B0, B1), 2)
+    catC = torch.cat((C0, C1, C2), 2)
+    pads = [catB + catC] + [catA + catC] * 6 + [catA + catB] * 6
+    out = out.reshape(out.shape[0], out.shape[1], 12, tgt.shape[-1])
+    xyz_losses, d_losses = [], []
+    for (t0, t1, t2), pad in zip(perms, pads):
+        t_full = torch.cat((t0, t1, t2), 2) + pad                             # [B,T,12,C]
+        mse = (out - t_full) ** 2                                             # nn.MSELoss(reduction="none") と同じ
+        xyz_losses.append(mse[:, :, XYZ_IDX, :].mean(dim=2))
+        if dist_mask:
+            act = torch.stack([(t_full[:, :, 4 * k:4 * k + 3, :] ** 2).sum(dim=2) > 0.25
+                               for k in range(3)], dim=2).to(mse.dtype)      # [B,T,3,C] 活動（se=1 の track）
+            d_losses.append(((mse[:, :, D_IDX, :] * act).sum(dim=2), act.sum(dim=2)))   # (和, 数) 各 [B,T,C]
+        else:
+            d_losses.append(mse[:, :, D_IDX, :].mean(dim=2))
+    loss_min = torch.min(torch.stack(xyz_losses, dim=0), dim=0).indices
+    sel_xyz = sum(l * (loss_min == n) for n, l in enumerate(xyz_losses)).mean()
+    if dist_mask:
+        num = sum(d[0] * (loss_min == n) for n, d in enumerate(d_losses)).sum()
+        cnt = sum(d[1] * (loss_min == n) for n, d in enumerate(d_losses)).sum()
+        sel_d = num / torch.clamp(cnt, min=1.0)
+    else:
+        sel_d = sum(l * (loss_min == n) for n, l in enumerate(d_losses)).mean()
+    return sel_xyz, sel_d
 
 
 def dist_encode(d):
@@ -214,30 +260,8 @@ def apply_train_patches():
         def __call__(self, output, target, epoch_it=0):
             out = output["multi_accdoa"]         # [B,T,12*C]
             tgt = target["adpit_label"]          # [B,T,6,5,C]
-            tok = [tgt[:, :, i, 0:1, :] * tgt[:, :, i, 1:, :]
-                   for i in range(6)]            # 各 [B,T,4,C]
-            A0, B0, B1, C0, C1, C2 = tok
-            perms = [
-                (A0, A0, A0), (B0, B0, B1), (B0, B1, B0), (B0, B1, B1),
-                (B1, B0, B0), (B1, B0, B1), (B1, B1, B0),
-                (C0, C1, C2), (C0, C2, C1), (C1, C0, C2), (C1, C2, C0),
-                (C2, C0, C1), (C2, C1, C0)]
-            catA = torch.cat((A0, A0, A0), 2)
-            catB = torch.cat((B0, B0, B1), 2)
-            catC = torch.cat((C0, C1, C2), 2)
-            pads = [catB + catC] + [catA + catC] * 6 + [catA + catB] * 6
-            out = out.reshape(out.shape[0], out.shape[1], 12, tgt.shape[-1])
-            xyz_losses, d_losses = [], []
-            for (t0, t1, t2), pad in zip(perms, pads):
-                t_full = torch.cat((t0, t1, t2), 2) + pad     # [B,T,12,C]
-                mse = self.losses(out, t_full)
-                xyz_losses.append(mse[:, :, XYZ_IDX, :].mean(dim=2))
-                d_losses.append(mse[:, :, D_IDX, :].mean(dim=2))
-            loss_min = torch.min(torch.stack(xyz_losses, dim=0), dim=0).indices
-            sel_xyz = sum(l * (loss_min == n)
-                          for n, l in enumerate(xyz_losses)).mean()
-            sel_d = sum(l * (loss_min == n)
-                        for n, l in enumerate(d_losses)).mean()
+            # 式は module の sde_loss_terms（#75 ④: SDE_DIST_MASK=1 で距離の MSE を活動フレームだけに。既定は旧の式）
+            sel_xyz, sel_d = sde_loss_terms(out, tgt, DIST_MASK)
             return {"loss_all": sel_xyz + W_DIST * sel_d,
                     "loss_adpit": sel_xyz,
                     "loss_other": W_DIST * sel_d}
