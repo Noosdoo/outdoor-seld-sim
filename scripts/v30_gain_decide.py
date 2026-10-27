@@ -10,8 +10,12 @@ F = 基準学習 20 epoch 目（epoch_019）の val のクラス平均 F: クラ
   3. seed 2 で g1・g2 を回し、**2 seed の平均 F で g2 が g1 より 1 pt 超良いときだけ g2**、それ以外は g1。
   4. 全候補が同点なら最小の倍率（= 規則 1 で g1 になる）。
 出力 decision.json: 規則の写し・候補数・各 seed・各倍率の未丸めの F とクラス別・分岐・最終の倍率。参考の列（決めには使わない）: 正解の無い本での発火の枠数。
+  参考の列の追加（2026-10-27 Fable 22:1x の直す所 1・#75 ② の併記「−5〜0 dB の枠の再現率」を帯域ゲート〔決め直し 4〕の版に）: --masks と --scenes を渡すと、
+  各倍率の reference に (1) 際の枠の再現率 = 正解のある枠のうち、そのクラスの正解を付ける音源（no_label・電車の車両を除く）の帯の SN 比
+  〔masks の snr_band_max_db・band_valid = 1〕の最大が 0 以上 +3 dB 未満の枠を、予測が拾った割合（クラス別と全体・フレーム 40〜99）と
+  (2) 正解の無い本で 1 回以上発火した本の数 を足す。どちらも決めには使わない（規則と F は変えない）。
 使い方: python scripts/v30_gain_decide.py --gt <metadata_dist dir> --manifest <val の csv（clip_id 列）> --seed1 0=<csv> 20=<csv> 30=<csv> 40=<csv>
-        [--seed2 <g1>=<csv> <g2>=<csv>] --out out/v30_gain_compare/decision.json
+        [--seed2 <g1>=<csv> <g2>=<csv>] [--masks <ds>/masks --scenes <ds>/work] --out out/v30_gain_compare/decision.json
         （seed2 を渡さないと規則 1・2 までで止まり、seed 2 で回す {g1, g2} を出す）
 止める: seed 1 の倍率が --candidates（既定 0,20,30,40）とそろわない（候補の欠損）・F が非有限（§9-3 の受け入れ）
 試験: scripts/test_gain_patch_v30.py の G1〜G3
@@ -80,6 +84,55 @@ def class_mean_f(gt: dict, pr: dict, clips: list) -> tuple[float | None, dict, i
     return (float(np.mean(list(fs.values()))) if fs else None), fs, n_fire_nogt
 
 
+EDGE_LO, EDGE_HI = 0.0, 3.0           # 際の枠 = 帯の SN 比 [0, +3) dB（正解の線 0 dB のすぐ上）
+
+
+def edge_frames(masks_dir: Path, scenes_dir: Path | None, clip: str, gt: np.ndarray) -> np.ndarray:
+    """際の枠（参考）: 正解のある (枠, クラス) のうち、正解を付ける音源の帯の SN 比の最大が [EDGE_LO, EDGE_HI) のもの → (NFR, 9) bool。
+    正解を付けない音源（scene の no_label・電車の車両 params.train_car）は除く（scenes が無ければ除けないので全部の行を使う）。"""
+    skip = set()
+    if scenes_dir is not None:
+        sp = scenes_dir / clip / "scene.json"
+        if sp.is_file():
+            for i, s in enumerate(json.loads(sp.read_text(encoding="utf-8")).get("sources", [])):
+                if s.get("no_label") or (s.get("params") or {}).get("train_car"):
+                    skip.add(i)
+    best = np.full((NFR, N_CLS), -np.inf)
+    mp = masks_dir / f"{clip}.csv"
+    if mp.is_file():
+        with open(mp, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if "snr_band_max_db" not in r or str(r.get("band_valid", "1")) != "1":
+                    continue
+                if "src" in r and r["src"] != "" and int(r["src"]) in skip:
+                    continue
+                k, c, v = int(r["frame"]), int(r["class"]), float(r["snr_band_max_db"])
+                if 0 <= k < NFR and 0 <= c < N_CLS and v > best[k, c]:
+                    best[k, c] = v
+    return gt & (best >= EDGE_LO) & (best < EDGE_HI)
+
+
+def edge_recall(edges: dict, pr: dict, clips: list) -> dict:
+    """際の枠の再現率（フレーム 40〜99）: クラス別 {c: [拾った, 際の枠の数, 再現率]} と全体。"""
+    hit, tot = np.zeros(N_CLS, dtype=np.int64), np.zeros(N_CLS, dtype=np.int64)
+    for cl in clips:
+        e = edges[cl][F0:]
+        p = pr.get(cl, np.zeros((NFR, N_CLS), dtype=bool))[F0:]
+        hit += (e & p).sum(axis=0); tot += e.sum(axis=0)
+    per = {str(c): {"hit": int(hit[c]), "n_edge": int(tot[c]), "recall": (float(hit[c] / tot[c]) if tot[c] else None)} for c in range(N_CLS)}
+    return {"band_db": [EDGE_LO, EDGE_HI], "per_class": per, "all": {"hit": int(hit.sum()), "n_edge": int(tot.sum()),
+            "recall": (float(hit.sum() / tot.sum()) if tot.sum() else None)}}
+
+
+def fire_clips_nogt(gt: dict, pr: dict, clips: list) -> int:
+    """正解の無い本（フレーム 40〜99 に正解が 1 つも無い）で、1 回以上発火した本の数（参考）。"""
+    n = 0
+    for cl in clips:
+        if not gt[cl][F0:].any() and pr.get(cl, np.zeros((NFR, N_CLS), dtype=bool))[F0:].any():
+            n += 1
+    return n
+
+
 def _check_finite(f: dict, name: str) -> None:
     bad = {g: v for g, v in f.items() if v is None or not np.isfinite(v)}
     if bad:
@@ -138,22 +191,36 @@ def main(argv=None) -> int:
     ap.add_argument("--seed2", nargs="*", default=None)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--candidates", default="0,20,30,40", help="seed 1 にそろうべき倍率（欠けていれば止める）")
+    ap.add_argument("--masks", type=Path, default=None, help="参考: 際の枠の再現率に使う masks の置き場（決めには使わない）")
+    ap.add_argument("--scenes", type=Path, default=None, help="参考: 正解を付けない音源を除くための work の置き場（--masks と一緒に）")
     a = ap.parse_args(argv)
+    if a.masks is not None and a.scenes is None:
+        raise SystemExit("--masks には --scenes も渡す（正解を付けない音源〔電車の車両など〕を除くため）")
     cands = sorted(float(x) for x in a.candidates.split(","))
     if sorted(_pairs(a.seed1)) != cands:
         raise SystemExit(f"seed 1 の倍率 {sorted(_pairs(a.seed1))} が候補 {cands} とそろわない（候補の欠損・止める）")
     with open(a.manifest, newline="", encoding="utf-8-sig") as f:
         clips = [r["clip_id"] for r in csv.DictReader(f)]
     gt = {c: gt_active(a.gt, c) for c in clips}
+    edges = {c: edge_frames(a.masks, a.scenes, c, gt[c]) for c in clips} if a.masks is not None else None
     res = {"rule": RULE, "n_clips": len(clips), "seed1": {}, "seed2": {}}
+    if edges is not None:
+        res["reference_note"] = ("reference は参考（決めには使わない・規則と F は変えない）: 際の枠 = 正解のある枠で、正解を付ける音源の帯の SN 比"
+                                 f"（masks の snr_band_max_db の最大・band_valid = 1）が [{EDGE_LO:g}, {EDGE_HI:g}) dB の枠・フレーム 40〜99。"
+                                 "#75 ② の「−5〜0 dB の枠の再現率」を帯域ゲート（決め直し 4）に合わせた版（Fable 10/27 22:1x）。"
+                                 "n_fire_clips_nogt = 正解の無い本で 1 回以上発火した本の数")
+        res["reference_source"] = {"masks": str(a.masks), "scenes": str(a.scenes)}
     f1, f2 = {}, {}
     for seed, items, store in (("seed1", a.seed1, f1), ("seed2", a.seed2, f2)):
         for g, p in sorted(_pairs(items).items()):
-            mf, fs, nf = class_mean_f(gt, pred_active(p, set(clips)), clips)
+            pr = pred_active(p, set(clips))
+            mf, fs, nf = class_mean_f(gt, pr, clips)
             if mf is None:
                 raise SystemExit(f"{seed} {g:g} dB: F が出ない（正解のあるクラスが無い）")
             store[g] = mf
             res[seed][f"{g:g}"] = {"pred": str(p), "mean_f": mf, "f_per_class": {str(k): v for k, v in fs.items()}, "n_fire_frames_nogt": nf}
+            if edges is not None:
+                res[seed][f"{g:g}"]["reference"] = {"edge_recall": edge_recall(edges, pr, clips), "n_fire_clips_nogt": fire_clips_nogt(gt, pr, clips)}
     res["n_candidates"] = len(f1)
     res["candidates"] = cands
     try:

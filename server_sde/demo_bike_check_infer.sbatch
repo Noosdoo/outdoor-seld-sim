@@ -23,7 +23,9 @@ export PS E2E PYTHONIOENCODING=utf-8
 export CAUSAL_CKPT=${CAUSAL_CKPT:-$HOME/PSELDNets_logs/outdoor_siren_v12/runs/outdoor_siren_v2final_v29_causal_ft/checkpoints/epoch_139.ckpt}
 export CAUSAL_OUT=${OUTTAG:-infer_demo_bike_check_v29e139}
 export HEIGHT_COND=1 HEIGHT_TABLE=$D/height_table.csv HEIGHT_DEFAULT=1.5 HEIGHT_JITTER=0 HEIGHT_OFFSET=0
-export CAUSAL_SED_TH=${CAUSAL_SED_TH:-0.7} CAUSAL_SED_STAY=${CAUSAL_SED_STAY:-0.3} CAUSAL_SED_ASSOC=20 CAUSAL_DSDIR=$PS/datasets_v27   # 閾値は切り分けのときだけ下げる（既定 = 提案法）
+export CAUSAL_SED_TH=${CAUSAL_SED_TH:-0.7} CAUSAL_SED_STAY=${CAUSAL_SED_STAY:-0.3} CAUSAL_SED_ASSOC=20 CAUSAL_DSDIR=${DEMO_DSDIR:-$PS/datasets_v27}   # 閾値は切り分けのときだけ下げる（既定 = 提案法）
+#   2026-10-27（#75 決め直し 8・倍率の比べの参考のデモ）: v30 の ckpt は DEMO_DSDIR=$PS/datasets_v30（未設定なら今のまま datasets_v27）。倍率は呼ぶ側が SDE_INPUT_GAIN_DB=<g> を明示（0 も）・
+#   線は CAUSAL_SED_TH=0.5 CAUSAL_SED_STAY=0.5（ヒステリシス無し）。_causal_infer_v17 が gain_patch を読み、check_ckpt が ckpt の倍率と違えば止める
 export SDE_W_DIST=3.0 SDE_DIST_MODE=log CAUSAL_KMIN=40 CAUSAL_REPEAT=2 CAUSAL_SEED=0 CAUSAL_DATASET=outdoor_siren_v12
 export CAUSAL_FOA=$D/clips CAUSAL_PREFIX=${DEMO_PREFIX:-eval_field_} CAUSAL_LIMIT=0 CAUSAL_EXPECTED_CLIPS=${N_CLIPS:-13}   # 切り分け 3（合成の自転車＋家の背景）は N_CLIPS=60・DEMO_DIR を差し替え
 #   2026-10-26: 開発用の学内の本（台帳で使わないの本・scripts/demo_field_unused_prepare.py）は DEMO_PREFIX=tune_field_（評価の eval_field_ と別の名前）。未設定なら今のまま eval_field_

@@ -186,6 +186,33 @@ def main() -> int:
               r.returncode == 0 and abs(f0 - 2 * 5 / 15) < 1e-9 and abs(f20 - 1.0) < 1e-9 and dj["n_candidates"] == 2 and "rule" in dj
               and dj["decision"]["g1"] == 20 and dj["decision"]["g2"] == 0 and dj["decision"]["final"] is None and dj["seed1"]["20"]["n_fire_frames_nogt"] == 1,
               (r.stderr[-300:] if r.returncode else str(dj.get("decision"))))
+        # G4（Fable 10/27 22:1x の直す所 1）: 参考の際の枠の再現率と正解の無い本の発火した本の数。決めと F は変えない
+        (td / "masks").mkdir(); (td / "work" / clips[0]).mkdir(parents=True); (td / "work" / clips[1]).mkdir(parents=True)
+        hd = "frame,class,track,src,snr_a_db,snr_a_bg_db,snr_band_max_db,band_hz,band_valid\n"
+        rows0 = "".join(f"{k},4,0,0,0,0,{(1.5 if k < 55 else 8.0)},500.0,1\n" for k in range(50, 60))          # 50〜54 が際（+1.5）・55〜59 は際の外（+8）
+        rows0 += "".join(f"{k},4,0,1,0,0,2.0,500.0,1\n" for k in range(55, 60))                             # src 1 は電車の車両（除く）→ 55〜59 は際にならない
+        rows0 += "".join(f"{k},4,0,2,0,0,2.5,500.0,0\n" for k in range(56, 58))                             # band_valid = 0 は使わない
+        (td / "masks" / f"{clips[0]}.csv").write_text(hd + rows0, encoding="utf-8")
+        (td / "masks" / f"{clips[1]}.csv").write_text(hd, encoding="utf-8")
+        (td / "work" / clips[0] / "scene.json").write_text(json.dumps({"sources": [{"class": "car_drive"}, {"class": "car_drive", "params": {"train_car": True}}, {"class": "car_drive"}]}), encoding="utf-8")
+        (td / "work" / clips[1] / "scene.json").write_text(json.dumps({"sources": []}), encoding="utf-8")
+        r4 = subprocess.run([sys.executable, str(ROOT / "scripts/v30_gain_decide.py"), "--gt", str(td / "gt"), "--manifest", str(td / "man.csv"),
+                             "--seed1", f"0={td / 'g0.csv'}", f"20={td / 'g20.csv'}", "--candidates", "0,20", "--masks", str(td / "masks"),
+                             "--scenes", str(td / "work"), "--out", str(td / "decision_ref.json")], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        r4n = subprocess.run([sys.executable, str(ROOT / "scripts/v30_gain_decide.py"), "--gt", str(td / "gt"), "--manifest", str(td / "man.csv"),
+                              "--seed1", f"0={td / 'g0.csv'}", f"20={td / 'g20.csv'}", "--candidates", "0,20", "--masks", str(td / "masks"),
+                              "--out", str(td / "decision_noscene.json")], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        dr = json.loads((td / "decision_ref.json").read_text(encoding="utf-8")) if r4.returncode == 0 else {}
+        e0 = dr.get("seed1", {}).get("0", {}).get("reference", {}).get("edge_recall", {}).get("per_class", {}).get("4", {})
+        e20 = dr.get("seed1", {}).get("20", {}).get("reference", {})
+        same = dr and {k: dr[k] for k in ("decision", "n_candidates")} == {k: dj[k] for k in ("decision", "n_candidates")} \
+            and all(dr["seed1"][g]["mean_f"] == dj["seed1"][g]["mean_f"] for g in ("0", "20"))
+        check("G4 参考（決めに使わない）: 際の枠 = 帯 [0, +3) の正解の枠・電車の車両と band_valid = 0 は除く・g0 は 5/5 拾う（50〜54）・g20 も 5/5・"
+              "正解の無い本の発火した本 g20 = 1・決めと F は参考なしと同じ・--masks だけ（--scenes なし）は止める",
+              r4.returncode == 0 and e0 == {"hit": 5, "n_edge": 5, "recall": 1.0} and e20.get("edge_recall", {}).get("all", {}).get("n_edge") == 5
+              and e20.get("n_fire_clips_nogt") == 1 and dr["seed1"]["0"]["reference"]["n_fire_clips_nogt"] == 0 and bool(same)
+              and "reference_note" in dr and r4n.returncode != 0 and not (td / "decision_noscene.json").exists(),
+              (r4.stderr[-300:] if r4.returncode else str(e0) + str(e20)[:200]))
     # G3
     def stops(f, *a):
         try:

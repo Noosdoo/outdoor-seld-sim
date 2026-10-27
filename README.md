@@ -26,6 +26,18 @@ SELD model (HTS-AT + multi-ACCDOA, via PSELDNets)
 notification layer  →  "car approaching, 4 o'clock, 5 seconds"
 ```
 
+## Current status (October 2026)
+
+- **Nine sound classes**: siren, car horn, backup beeper, bicycle bell, car, level-crossing
+  alarm, e-scooter, motorcycle, and bicycle rolling sound (no bell) — the last one added in
+  October and modelled on measurements
+- **Real-world evaluation in progress**: field recordings with a first-order Ambisonics
+  recorder, with ground truth read from video and floor markers (`scripts/step19*`)
+- **Baselines set up for comparison**: the DCASE 2024 Task 3 baseline and PSELDNets with
+  pretraining only (`server_sde/baseline_B_*`, `baseline_D_*`)
+- **Retraining on the current data recipe** (audibility-gated labels, per-clip background
+  shape). The evaluation set is sealed and will be opened once, after the retraining
+
 ## Why this exists
 
 Sirens, horns, backup beeps, bicycle bells and level-crossing alarms are the channel
@@ -159,6 +171,7 @@ and multi-source, with a notification layer that is evaluated rather than demons
 - New and revised sound sources: warning sounds (3rd revision), siren (6th), bicycle
   rolling sound and bell modelled on measurements, EV/HV approach sound (AVAS),
   rain, and an urban background whose spectral shape varies per clip
+- A ninth class, bicycle rolling sound, and a field-annotation path that accepts it
 - Absolute level design in dB SPL and an in-band audibility gate, so a label is only
   emitted when the source is actually audible above the background
 - Field-recording toolchain for the real-world evaluation: conversion, annotation and
